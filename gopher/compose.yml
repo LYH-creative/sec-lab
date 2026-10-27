@@ -1,0 +1,75 @@
+name: gopher
+
+services:
+  # 六关共用的「业务站」：所有 SSRF 入口都在这里
+  web:
+    build: .
+    image: gopher-web:8.1
+    container_name: gopher-web
+    ports:
+      - "127.0.0.1:8896:80"
+    volumes:
+      - ./src:/var/www/html
+      - ./flags/l4.flag:/flag_l4:ro
+    restart: unless-stopped
+
+  # L1 的目标：对宿主机暴露 7070，方便用 curl 直接打
+  legacy-public:
+    image: python:3.12-slim
+    container_name: gopher-legacy-public
+    command: ["python3", "/app/server.py", "--root", "/data", "--gopher-port", "70"]
+    volumes:
+      - ./legacy:/app:ro
+      - ./legacy/public:/data:ro
+    ports:
+      - "127.0.0.1:7070:70"
+    restart: unless-stopped
+
+  # L2 的目标：不映射端口，只有容器网络能到（gopher:70 + http:8081）
+  legacy-internal:
+    image: python:3.12-slim
+    container_name: gopher-legacy-internal
+    command:
+      ["python3", "/app/server.py", "--root", "/data", "--gopher-port", "70", "--http-port", "8081"]
+    volumes:
+      - ./legacy:/app:ro
+      - ./legacy/internal:/data:ro
+    restart: unless-stopped
+
+  # L3 / L4：未授权 Redis。故意和 web 共享 uploads 目录，让 CONFIG SET dir 能落地
+  redis:
+    image: redis:7-alpine
+    container_name: gopher-redis
+    # Redis 7 把 dir / dbfilename 归为 protected config，默认 no（禁止 CONFIG SET）。
+    # 老版本（<=6.2）没有这道闸，为了保持 L4 的可利用性，这里设成 yes。
+    command:
+      - "redis-server"
+      - "--protected-mode"
+      - "no"
+      - "--save"
+      - ""
+      - "--enable-protected-configs"
+      - "yes"
+    volumes:
+      - ./src/uploads:/var/www/html/uploads
+    restart: unless-stopped
+
+  # L5：MariaDB，有一个免密账号 ssrf
+  db:
+    image: mariadb:11.4
+    container_name: gopher-db
+    environment:
+      MARIADB_ROOT_PASSWORD: root123
+    volumes:
+      - ./db/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+    restart: unless-stopped
+
+  # L6：裸 php-fpm，9000 端口没有 nginx 挡着
+  fpm:
+    build: ./fpm
+    image: gopher-fpm:8.1
+    container_name: gopher-fpm
+    volumes:
+      - ./fpm/html:/var/www/html
+      - ./flags/l6.flag:/flag_l6:ro
+    restart: unless-stopped

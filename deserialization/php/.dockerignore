@@ -1,0 +1,9 @@
+# 构建上下文排除项
+# Dockerfile 用 COPY src/ 进镜像，uploads 是练习产物，不进镜像
+# （容器里由 Dockerfile 自己 mkdir，运行时 bind mount 覆盖）
+
+**/.git
+**/__pycache__
+**/*.pyc
+src/uploads/*
+!src/uploads/.gitkeep

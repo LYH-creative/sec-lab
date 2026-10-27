@@ -1,0 +1,87 @@
+# ARP 欺骗靶场 —— 三容器架构
+#
+# 拓扑（同一个 Docker bridge，二层互通，这正是 ARP 欺骗的必要条件）：
+#
+#     victim 172.28.0.3 ──┐
+#                         ├── arpnet (172.28.0.0/24)
+#     attacker 172.28.0.4 ┘        │
+#                                  │
+#     gateway 172.28.0.2 ──────────┘
+#
+# 正常情况：victim 的默认路由指向 gateway，上网流量直接发给 gateway 的 MAC
+# 被欺骗后：victim 的 ARP 缓存里「gateway IP → attacker MAC」，流量先到攻击机
+#
+# 三个容器都必须是 NET_ADMIN + NET_RAW：
+#   NET_RAW    发原始二层帧（scapy / arpspoof / tcpdump 都需要）
+#   NET_ADMIN  改路由、改 ARP 缓存、开 IP 转发（sysctl net.ipv4.ip_forward）
+
+name: arp-lab
+
+services:
+  # ── 网关：扮演路由器 / 上游服务器 ──────────────────────────────
+  gateway:
+    build: .
+    image: arp-lab:latest
+    # 三个服务共用本地镜像，禁止去 registry 拉（否则会报 denied）
+    pull_policy: never
+    container_name: arp-gw
+    # 起一个会打印请求内容的 HTTP 服务，方便观察「谁在跟谁说话」
+    command: ["python3", "/lab/server.py", "80"]
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      # 脚本目录只读挂进去，改脚本不用重建镜像
+      - ./scripts:/lab:ro
+    networks:
+      arpnet:
+        ipv4_address: 172.28.0.2
+
+  # ── 受害者：被欺骗的普通主机 ──────────────────────────────────
+  victim:
+    image: arp-lab:latest
+    pull_policy: never
+    container_name: arp-victim
+    # 默认路由从 Docker 的 172.28.0.1 改到我们的「网关」172.28.0.2
+    # `replace` 而不是 `add`：Docker 启动时已经塞了一条 default，add 会报 File exists
+    command:
+      - sh
+      - -c
+      - |
+        ip route replace default via 172.28.0.2
+        sleep infinity
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ./scripts:/lab:ro
+    networks:
+      arpnet:
+        ipv4_address: 172.28.0.3
+
+  # ── 攻击机：ARP 毒化 + 抓包 ────────────────────────────────────
+  attacker:
+    image: arp-lab:latest
+    pull_policy: never
+    container_name: arp-attacker
+    command: ["sleep", "infinity"]
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    # 容器内的 sysctl 在启动时由 Docker 设置；进去以后再 `sysctl -w` 会被拒
+    # （net.ipv4.ip_forward 属于要在创建 netns 时就定好的参数），所以写在这里
+    sysctls:
+      - net.ipv4.ip_forward=1
+    volumes:
+      - ./scripts:/lab:ro
+    networks:
+      arpnet:
+        ipv4_address: 172.28.0.4
+
+networks:
+  arpnet:
+    driver: bridge
+    ipam:
+      config:
+        # 固定网段，脚本里所有 IP 都写死，不靠 Docker 随机分配
+        - subnet: 172.28.0.0/24

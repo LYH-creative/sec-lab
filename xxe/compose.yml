@@ -1,0 +1,26 @@
+name: xxe
+
+services:
+  # 对外的「业务站」：L1 / L2 / L3 / L5 都在这里
+  web:
+    build: .
+    image: xxe-php:8.1
+    container_name: xxe-web
+    ports:
+      - "127.0.0.1:8895:80"
+    volumes:
+      - ./src:/var/www/html
+      - ./flags/web.flag:/flag:ro
+      - ./flags/blind.flag:/flag_blind:ro
+    restart: unless-stopped
+
+  # 内网服务：故意不映射端口。宿主机 curl 不到，只有容器网络里能访问 —— L4 的目标
+  internal:
+    image: xxe-php:8.1
+    container_name: xxe-internal
+    depends_on:
+      - web
+    volumes:
+      - ./internal:/var/www/html
+      - ./flags/internal.flag:/flag:ro
+    restart: unless-stopped

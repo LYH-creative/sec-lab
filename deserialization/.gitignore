@@ -1,0 +1,13 @@
+# macOS
+.DS_Store
+
+# 运行产物（L4 上传的文件、被复制出来的 flag）
+php/src/uploads/*
+!php/src/uploads/.gitkeep
+
+# 第三方二进制，由 Dockerfile 构建时下载
+java/lib/
+
+# 本地临时文件
+*.log
+__pycache__/

@@ -1,0 +1,10 @@
+# 构建上下文排除项
+# gopher 的 Dockerfile 只做 RUN（不 COPY），上下文小一点构建更快
+
+**/.git
+**/.DS_Store
+**/__pycache__
+**/*.pyc
+**/*.md
+src/uploads/*
+!src/uploads/.gitkeep

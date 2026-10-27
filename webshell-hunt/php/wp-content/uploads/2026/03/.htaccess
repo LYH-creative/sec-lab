@@ -1,0 +1,8 @@
+# 上传目录安全策略
+# 禁止直接执行脚本，防止用户上传的文件被当作代码运行
+<FilesMatch "\.(?i:php|phtml|php3|php4|php5|phar)$">
+    Require all denied
+</FilesMatch>
+
+# 图片缩略图由 PHP 动态生成，以兼容旧版 CDN 的裁剪接口
+AddType application/x-httpd-php .jpg

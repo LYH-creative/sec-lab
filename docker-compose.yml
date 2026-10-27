@@ -1,0 +1,441 @@
+# =============================================================================
+#  SecLab —— 安全靶场合集（单文件编排）
+# =============================================================================
+#
+#  一条命令起全部：
+#      docker compose up -d --build
+#  或者用封装脚本（会额外做 flag 铺设、权限修正、数据库初始化）：
+#      ./lab.sh up
+#
+#  设计要点（改这个文件之前请先读）：
+#
+#  1. 每个靶场一个独立 bridge 网络。
+#     不能合并成一个大网络 —— xxe / gopher 的 SSRF 关卡会打「内网服务」，
+#     如果所有靶场同网，SSRF 顺手就能摸到隔壁 dvwa，关卡边界就没了。
+#
+#  2. 服务名加了靶场前缀（gopher-redis、xxe-internal …），
+#     但每个服务都带 network alias 保留原名（redis、internal …）。
+#     原因：各靶场 src/*.php 和 poc/*.py 里写死了这些 hostname，
+#     用 alias 才能一行代码不改地复用。
+#
+#  3. 端口一律绑 127.0.0.1（可用环境变量 LAB_BIND 覆盖）。
+#     靶场有真实漏洞，绑 0.0.0.0 等于把 DVWA 的 RCE 送给整个局域网。
+#
+#  4. arp 放在 profile=net 里，默认不启动。
+#     它是网络层实验（NET_ADMIN + NET_RAW），跑完就该关掉，
+#     而且需要单独构建镜像。用 ./lab.sh up all 或
+#     docker compose --profile net up -d 启动。
+#
+# =============================================================================
+
+name: sec-lab
+
+# ---------------------------------------------------------------------------
+# 公共片段：限制容器日志大小，避免长期跑把磁盘写满
+# ---------------------------------------------------------------------------
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-restart: &default-restart
+  restart: unless-stopped
+
+services:
+
+  # ===========================================================================
+  #  0. 导航页
+  # ===========================================================================
+  portal:
+    image: nginx:1.27-alpine
+    container_name: lab-portal
+    <<: *default-restart
+    ports:
+      - "${LAB_BIND:-127.0.0.1}:8880:80"
+    volumes:
+      - ./portal/html:/usr/share/nginx/html:ro
+    logging: *default-logging
+    networks:
+      - portal-net
+
+  # ===========================================================================
+  #  1. DVWA —— 综合 Web 漏洞（18 个模块 × 4 档难度）
+  #     web 容器不含数据库，必须配独立的 mariadb
+  # ===========================================================================
+  dvwa:
+    image: ghcr.io/digininja/dvwa:latest
+    container_name: dvwa
+    <<: *default-restart
+    depends_on:
+      dvwa-db:
+        condition: service_healthy
+    environment:
+      DB_SERVER: dvwa-db
+      DB_PORT: "3306"
+      DB_DATABASE: dvwa
+      DB_USER: dvwa
+      DB_PASSWORD: p@ssw0rd
+      DEFAULT_SECURITY_LEVEL: low
+    ports:
+      - "${LAB_BIND:-127.0.0.1}:8888:80"
+    logging: *default-logging
+    networks:
+      - dvwa-net
+
+  dvwa-db:
+    image: mariadb:11.4
+    container_name: dvwa-db
+    <<: *default-restart
+    environment:
+      MYSQL_ROOT_PASSWORD: rootp@ssw0rd
+      MYSQL_DATABASE: dvwa
+      MYSQL_USER: dvwa
+      MYSQL_PASSWORD: p@ssw0rd
+    volumes:
+      - dvwa-db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    logging: *default-logging
+    networks:
+      - dvwa-net
+
+  # ===========================================================================
+  #  2. 反序列化 —— PHP 8.1（L1~L3）/ PHP 7.4（L4 phar）/ Java CC6
+  # ===========================================================================
+  deser-php:
+    build:
+      context: ./deserialization/php
+      args:
+        PHP_BASE: "8.1"
+        FLAG: "FLAG{php_deser_unserialize_pwned_8a3f}"
+    image: sec-lab/deser-php:8.1
+    container_name: deser-php
+    <<: *default-restart
+    ports:
+      - "${LAB_BIND:-127.0.0.1}:8890:80"
+    volumes:
+      - ./deserialization/php/src:/var/www/html
+      - ./deserialization/php/poc:/poc
+    logging: *default-logging
+    networks:
+      - deser-net
+
+  # phar 的触发点只在 PHP 7.x 有效；8.x 改成了惰性反序列化
+  deser-php74:
+    build:
+      context: ./deserialization/php
+      args:
+        PHP_BASE: "7.4"
+        FLAG: "FLAG{php_deser_phar_6c2e}"
+    image: sec-lab/deser-php:7.4
+    container_name: deser-php74
+    <<: *default-restart
+    ports:
+      - "${LAB_BIND:-127.0.0.1}:8891:80"
+    volumes:
+      - ./deserialization/php/src:/var/www/html
+      - ./deserialization/php/poc:/poc
+    logging: *default-logging
+    networks:
+      - deser-net
+
+  deser-java:
+    build:
+      context: ./deserialization/java
+      args:
+        FLAG: "FLAG{java_deser_cc6_9f1c}"
+    image: sec-lab/deser-java:8
+    container_name: deser-java
+    <<: *default-restart
+    ports:
+      - "${LAB_BIND:-127.0.0.1}:8892:8080"
+    logging: *default-logging
+    networks:
+      - deser-net
+
+  # ===========================================================================
+  #  3. XXE —— 五关递进（回显 → 盲打 → 报错 → SSRF → 上传）
+  # ===========================================================================
+  xxe-web:
+    build: ./xxe
+    image: sec-lab/xxe:8.1
+    container_name: xxe-web
+    <<: *default-restart
+    ports:
+      - "${LAB_BIND:-127.0.0.1}:8895:80"
+    volumes:
+      - ./xxe/src:/var/www/html
+      - ./xxe/flags/web.flag:/flag:ro
+      - ./xxe/flags/blind.flag:/flag_blind:ro
+    logging: *default-logging
+    networks:
+      - xxe-net
+
+  # L4 的目标：不映射端口，宿主机 curl 不到，只有容器网络可达
+  xxe-internal:
+    image: sec-lab/xxe:8.1
+    pull_policy: never
+    container_name: xxe-internal
+    <<: *default-restart
+    depends_on:
+      xxe-web:
+        condition: service_started
+    volumes:
+      - ./xxe/internal:/var/www/html
+      - ./xxe/flags/internal.flag:/flag:ro
+    logging: *default-logging
+    networks:
+      xxe-net:
+        aliases:
+          - internal
+
+  # ===========================================================================
+  #  4. Gopher —— 六关，用 gopher:// 打通 Redis / MySQL / php-fpm
+  # ===========================================================================
+  gopher-web:
+    build: ./gopher
+    image: sec-lab/gopher-web:8.1
+    container_name: gopher-web
+    <<: *default-restart
+    depends_on:
+      gopher-redis:
+        condition: service_started
+      gopher-db:
+        condition: service_started
+    ports:
+      - "${LAB_BIND:-127.0.0.1}:8896:80"
+    volumes:
+      - ./gopher/src:/var/www/html
+      - ./gopher/flags/l4.flag:/flag_l4:ro
+    logging: *default-logging
+    networks:
+      - gopher-net
+
+  # L1 的靶子：对宿主机暴露 7070，方便 curl 直连看协议长什么样
+  gopher-legacy-public:
+    image: python:3.12-slim
+    container_name: gopher-legacy-public
+    <<: *default-restart
+    command: ["python3", "/app/server.py", "--root", "/data", "--gopher-port", "70"]
+    volumes:
+      - ./gopher/legacy:/app:ro
+      - ./gopher/legacy/public:/data:ro
+    ports:
+      - "${LAB_BIND:-127.0.0.1}:7070:70"
+    logging: *default-logging
+    networks:
+      gopher-net:
+        aliases:
+          - legacy-public
+
+  # L2 的靶子：不给宿主机端口，只能靠 302 跳转从容器内摸过去
+  gopher-legacy-internal:
+    image: python:3.12-slim
+    container_name: gopher-legacy-internal
+    <<: *default-restart
+    command:
+      ["python3", "/app/server.py", "--root", "/data", "--gopher-port", "70", "--http-port", "8081"]
+    volumes:
+      - ./gopher/legacy:/app:ro
+      - ./gopher/legacy/internal:/data:ro
+    logging: *default-logging
+    networks:
+      gopher-net:
+        aliases:
+          - legacy-internal
+
+  # L3 / L4：未授权 Redis，故意和 web 共享 uploads 目录让 CONFIG SET dir 能落地
+  gopher-redis:
+    image: redis:7-alpine
+    container_name: gopher-redis
+    <<: *default-restart
+    # Redis 7 默认禁止 CONFIG SET dir/dbfilename，这里是 L4 成立的前提
+    command:
+      - redis-server
+      - "--protected-mode"
+      - "no"
+      - "--save"
+      - ""
+      - "--enable-protected-configs"
+      - "yes"
+    volumes:
+      - ./gopher/src/uploads:/var/www/html/uploads
+    logging: *default-logging
+    networks:
+      gopher-net:
+        aliases:
+          - redis
+
+  # L5：MariaDB，里面有个免密账号 ssrf
+  gopher-db:
+    image: mariadb:11.4
+    container_name: gopher-db
+    <<: *default-restart
+    environment:
+      MARIADB_ROOT_PASSWORD: root123
+    volumes:
+      - ./gopher/db/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+    logging: *default-logging
+    networks:
+      gopher-net:
+        aliases:
+          - db
+
+  # L6：裸 php-fpm，9000 端口前面没有 nginx
+  gopher-fpm:
+    build: ./gopher/fpm
+    image: sec-lab/gopher-fpm:8.1
+    container_name: gopher-fpm
+    <<: *default-restart
+    volumes:
+      - ./gopher/fpm/html:/var/www/html
+      - ./gopher/flags/l6.flag:/flag_l6:ro
+    logging: *default-logging
+    networks:
+      gopher-net:
+        aliases:
+          - fpm
+
+  # ===========================================================================
+  #  5. JWT —— 弱密钥 / alg:none / 算法混淆 / kid 路径穿越
+  # ===========================================================================
+  jwt-web:
+    build: ./jwt
+    image: sec-lab/jwt:8.1
+    container_name: jwt-web
+    <<: *default-restart
+    # bind mount 会保留宿主机权限位：私钥 600 的话 www-data 读不到，
+    # openssl_sign 会静默签出空签名。启动前统一放宽一次。
+    command:
+      - /bin/sh
+      - -c
+      - chmod 644 /var/www/html/keys/*.key /var/www/html/keys/*.pem /var/www/html/pub.pem 2>/dev/null; exec apache2-foreground
+    ports:
+      - "${LAB_BIND:-127.0.0.1}:8898:80"
+    volumes:
+      - ./jwt/src:/var/www/html
+      - ./jwt/flags/l1.flag:/flag_l1:ro
+      - ./jwt/flags/l2.flag:/flag_l2:ro
+      - ./jwt/flags/l3.flag:/flag_l3:ro
+      - ./jwt/flags/l4.flag:/flag_l4:ro
+    logging: *default-logging
+    networks:
+      - jwt-net
+
+  # ===========================================================================
+  #  6. webshell-hunt —— 应急响应：在「已被入侵」的 WP 站里找出 9 处后门
+  #     容器名固定为 webshell-hunt，hunt.py --docker webshell-hunt 依赖它
+  # ===========================================================================
+  webshell-hunt:
+    build: ./webshell-hunt
+    image: sec-lab/webshell-hunt:1.0
+    container_name: webshell-hunt
+    <<: *default-restart
+    ports:
+      - "${LAB_BIND:-127.0.0.1}:8899:80"
+    logging: *default-logging
+    networks:
+      - hunt-net
+
+  # ===========================================================================
+  #  7. ARP 欺骗 —— 三容器同 bridge，二层互通才能投毒
+  #     profile=net，默认不启动（./lab.sh up all）
+  # ===========================================================================
+  arp-gateway:
+    build: ./arp
+    image: arp-lab:latest
+    container_name: arp-gw
+    profiles: ["net"]
+    <<: *default-restart
+    command: ["python3", "/lab/server.py", "80"]
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ./arp/scripts:/lab:ro
+    logging: *default-logging
+    networks:
+      arp-net:
+        ipv4_address: 172.28.0.2
+
+  arp-victim:
+    image: arp-lab:latest
+    pull_policy: never
+    container_name: arp-victim
+    profiles: ["net"]
+    <<: *default-restart
+    depends_on:
+      arp-gateway:
+        condition: service_started
+    # 默认路由从 Docker 的 172.28.0.1 改到「我们的网关」。
+    # 必须用 replace：Docker 启动时已经塞了一条 default，add 会报 File exists
+    command:
+      - sh
+      - -c
+      - |
+        ip route replace default via 172.28.0.2
+        sleep infinity
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ./arp/scripts:/lab:ro
+    logging: *default-logging
+    networks:
+      arp-net:
+        ipv4_address: 172.28.0.3
+
+  arp-attacker:
+    image: arp-lab:latest
+    pull_policy: never
+    container_name: arp-attacker
+    profiles: ["net"]
+    <<: *default-restart
+    depends_on:
+      arp-gateway:
+        condition: service_started
+    command: ["sleep", "infinity"]
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    # ip_forward 必须在 netns 创建时就定好，进容器后再 sysctl -w 会被拒
+    sysctls:
+      - net.ipv4.ip_forward=1
+    volumes:
+      - ./arp/scripts:/lab:ro
+    logging: *default-logging
+    networks:
+      arp-net:
+        ipv4_address: 172.28.0.4
+
+# =============================================================================
+#  网络：一个靶场一个，互不可见
+# =============================================================================
+networks:
+  portal-net:
+    driver: bridge
+  dvwa-net:
+    driver: bridge
+  deser-net:
+    driver: bridge
+  xxe-net:
+    driver: bridge
+  gopher-net:
+    driver: bridge
+  jwt-net:
+    driver: bridge
+  hunt-net:
+    driver: bridge
+  arp-net:
+    driver: bridge
+    ipam:
+      config:
+        # 固定网段：arp/scripts 里所有 IP 都写死了，不能靠 Docker 随机分配
+        - subnet: 172.28.0.0/24
+
+volumes:
+  dvwa-db-data:

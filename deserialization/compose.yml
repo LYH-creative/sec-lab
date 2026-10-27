@@ -1,0 +1,43 @@
+name: deserialization
+
+services:
+  # PHP 8.1：L1 / L2 / L3
+  php:
+    build:
+      context: ./php
+      args:
+        PHP_BASE: "8.1"
+        FLAG: "FLAG{php_deser_unserialize_pwned_8a3f}"
+    container_name: deser-php
+    ports:
+      - "127.0.0.1:8890:80"
+    volumes:
+      - ./php/src:/var/www/html
+      - ./php/poc:/poc
+    restart: unless-stopped
+
+  # PHP 7.4：只为了 L4（phar）—— 现代 PHP 上这个触发点已经失效
+  php74:
+    build:
+      context: ./php
+      args:
+        PHP_BASE: "7.4"
+        FLAG: "FLAG{php_deser_phar_6c2e}"
+    container_name: deser-php74
+    ports:
+      - "127.0.0.1:8891:80"
+    volumes:
+      - ./php/src:/var/www/html
+      - ./php/poc:/poc
+    restart: unless-stopped
+
+  # JDK 8 + commons-collections 3.1：Java 原生反序列化
+  java:
+    build:
+      context: ./java
+      args:
+        FLAG: "FLAG{java_deser_cc6_9f1c}"
+    container_name: deser-java
+    ports:
+      - "127.0.0.1:8892:8080"
+    restart: unless-stopped

@@ -1,0 +1,10 @@
+name: webshell-hunt
+
+services:
+  web:
+    build: .
+    image: webshell-hunt:1.0
+    container_name: webshell-hunt
+    ports:
+      - "127.0.0.1:8899:80"
+    restart: unless-stopped

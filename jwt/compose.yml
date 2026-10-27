@@ -1,0 +1,22 @@
+name: jwt
+
+services:
+  web:
+    build: .
+    image: jwt-php:8.1
+    container_name: jwt-web
+    ports:
+      - "127.0.0.1:8898:80"
+    # bind mount 会保留宿主机的权限位：私钥是 600 的话，容器里 www-data 读不到，
+    # openssl_sign 会静默失败、签出空签名。所以每次启动先修正一遍再拉起 Apache。
+    command:
+      - /bin/sh
+      - -c
+      - chmod 644 /var/www/html/keys/*.key /var/www/html/keys/*.pem /var/www/html/pub.pem 2>/dev/null; exec apache2-foreground
+    volumes:
+      - ./src:/var/www/html
+      - ./flags/l1.flag:/flag_l1:ro
+      - ./flags/l2.flag:/flag_l2:ro
+      - ./flags/l3.flag:/flag_l3:ro
+      - ./flags/l4.flag:/flag_l4:ro
+    restart: unless-stopped

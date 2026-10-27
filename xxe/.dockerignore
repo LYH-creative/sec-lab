@@ -1,0 +1,11 @@
+# 构建上下文排除项
+# 这些文件不参与镜像构建，减少上下文体积、避免把练习产物打进镜像
+
+**/.git
+**/.git.archive
+**/.DS_Store
+**/__pycache__
+**/*.pyc
+**/*.md
+**/uploads/*
+!**/uploads/.gitkeep

@@ -1,0 +1,37 @@
+# ---- 系统与编辑器 ----
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# ---- 本地配置 ----
+.env
+
+# ---- WorkBuddy 本地工作数据 ----
+.workbuddy/
+
+# ---- 练习产物：各靶场的上传目录 ----
+# 目录本身要保留（容器要往里写），内容不进仓库
+deserialization/php/src/uploads/*
+!deserialization/php/src/uploads/.gitkeep
+gopher/src/uploads/*
+!gopher/src/uploads/.gitkeep
+xxe/src/uploads/*
+!xxe/src/uploads/.gitkeep
+
+# ---- 嵌套的独立仓库 ----
+# deserialization/ 原本是独立仓库（LYH-creative/deser-lab）。
+# 合并进本仓库时把它的 .git 归档成 .git.archive，避免顶层把整个目录
+# 当成 submodule 跳过（那样 clone 下来目录会是空的）。
+# 想恢复独立仓库：mv deserialization/.git.archive deserialization/.git
+deserialization/.git.archive/
+
+# ---- Python ----
+__pycache__/
+*.pyc
+
+# ---- 日志 ----
+# 注意：webshell-hunt/access.log 是靶场内容，必须提交，不要在这里排除
+*.log
+!webshell-hunt/access.log

@@ -1,0 +1,45 @@
+# DVWA 靶场 —— 双容器架构
+# web 容器（Apache + PHP）本身不含数据库，需要下面独立的 db 容器配合
+services:
+  dvwa:
+    image: ghcr.io/digininja/dvwa:latest
+    container_name: dvwa
+    depends_on:
+      db:
+        # 等 db 真正「能接受连接」后再启动 web，避免首次建库时连不上
+        condition: service_healthy
+    environment:
+      # web 容器连库用的地址：db 是 compose 网络里的服务名，Docker 内置 DNS 会解析成 db 容器 IP
+      - DB_SERVER=db
+      - DB_PORT=3306
+      - DB_DATABASE=dvwa
+      - DB_USER=dvwa
+      - DB_PASSWORD=p@ssw0rd
+      # 靶场默认安全级别（low / medium / high / impossible），练习用 low 最省事
+      - DEFAULT_SECURITY_LEVEL=low
+    ports:
+      # 三段式：绑定地址:宿主机端口:容器端口。只绑 127.0.0.1 = 仅本机可访问
+      - "127.0.0.1:8888:80"
+    restart: unless-stopped
+
+  db:
+    image: mariadb:11.4
+    container_name: dvwa-db
+    environment:
+      - MYSQL_ROOT_PASSWORD=rootp@ssw0rd
+      # 下面三项会在容器首次初始化时自动建好：库 dvwa、用户 dvwa、密码 p@ssw0rd
+      - MYSQL_DATABASE=dvwa
+      - MYSQL_USER=dvwa
+      - MYSQL_PASSWORD=p@ssw0rd
+    volumes:
+      # 用命名卷持久化数据，容器删了数据还在（想彻底重置就 docker compose down -v）
+      - dvwa-db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  dvwa-db-data:

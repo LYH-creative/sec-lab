@@ -1,0 +1,171 @@
+* { box-sizing: border-box; }
+
+body {
+    margin: 0 auto;
+    padding: 32px 24px 64px;
+    max-width: 880px;
+    font: 15px/1.7 -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+    color: #1f2328;
+    background: #fbfbfa;
+}
+
+h1 { font-size: 22px; margin: 0 0 8px; }
+h2 { font-size: 17px; margin: 28px 0 8px; }
+
+.sub { color: #57606a; font-size: 13.5px; }
+a { color: #0969da; text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+code {
+    padding: 1px 5px;
+    font-size: 13px;
+    background: #eef1f4;
+    border-radius: 4px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+ul.levels { list-style: none; padding: 0; margin: 24px 0; }
+
+ul.levels li {
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    background: #fff;
+    border: 1px solid #e4e7eb;
+    border-left: 3px solid #0969da;
+    border-radius: 6px;
+}
+
+ul.levels li span {
+    display: block;
+    margin-top: 4px;
+    font-size: 13px;
+    color: #57606a;
+}
+
+ul.levels li.safe { border-left-color: #1a7f37; }
+
+form { margin: 18px 0; }
+
+textarea, input[type=text] {
+    width: 100%;
+    padding: 10px 12px;
+    font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: #1f2328;
+    background: #fff;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    resize: vertical;
+}
+
+input[type=file] { font-size: 13px; }
+
+button {
+    margin-top: 10px;
+    padding: 8px 18px;
+    font-size: 14px;
+    color: #fff;
+    background: #1f6feb;
+    border: 0;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+button:hover { background: #1a5fd0; }
+
+.err, .out, .ok {
+    margin: 14px 0;
+    padding: 12px 14px;
+    border-radius: 6px;
+    font-size: 13.5px;
+}
+
+.err { background: #fff1f0; border: 1px solid #ffccc7; color: #a8071a; }
+.out { background: #fff; border: 1px solid #e4e7eb; }
+.ok  { background: #f0fff4; border: 1px solid #b7ebc8; color: #1a7f37; }
+
+.out pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-all;
+    font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.hint {
+    margin: 18px 0;
+    padding: 12px 14px;
+    font-size: 13px;
+    color: #57606a;
+    background: #f6f8fa;
+    border-left: 3px solid #d0d7de;
+}
+
+.back { display: inline-block; margin-bottom: 16px; font-size: 13px; }
+
+/* ---- JWT 靶场追加 ---- */
+
+nav { margin-bottom: 20px; font-size: 13px; }
+
+nav a {
+    display: inline-block;
+    margin-right: 14px;
+    padding: 3px 0;
+    color: #57606a;
+}
+
+nav a.on { color: #0969da; border-bottom: 2px solid #0969da; }
+
+input[type=password] {
+    width: 100%;
+    padding: 10px 12px;
+    font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: #1f2328;
+    background: #fff;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+}
+
+input[type=text] { margin-bottom: 10px; }
+input[type=password] { margin-bottom: 10px; }
+
+.tok {
+    margin: 10px 0;
+    padding: 12px 14px;
+    background: #fff;
+    border: 1px solid #e4e7eb;
+    border-radius: 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    line-height: 2;
+}
+
+.seg { display: flex; gap: 10px; align-items: baseline; }
+
+.seg span {
+    flex: 0 0 60px;
+    color: #8a9199;
+    font-family: -apple-system, "PingFang SC", sans-serif;
+    font-size: 11px;
+}
+
+.seg code { word-break: break-all; background: none; padding: 0; }
+.seg.h code { color: #a8071a; }
+.seg.p code { color: #0969da; }
+.seg.s code { color: #6639ba; }
+
+.decoded {
+    margin: 8px 0 18px;
+    padding: 10px 14px;
+    font-size: 12px;
+    color: #57606a;
+    background: #f6f8fa;
+    border-radius: 6px;
+}
+
+.decoded b {
+    display: inline-block;
+    width: 58px;
+    font-weight: 400;
+    color: #8a9199;
+}
+
+.decoded code { font-size: 12px; word-break: break-all; background: none; padding: 0; }

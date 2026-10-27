@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SecLab · 安全靶场合集</title>
+<style>
+  :root {
+    --bg:        #0a0e14;
+    --bg-soft:   #0f151d;
+    --panel:     #121a24;
+    --panel-2:   #16202c;
+    --line:      #223040;
+    --line-soft: #1a2530;
+    --text:      #dbe6f2;
+    --text-dim:  #7c8fa3;
+    --text-mute: #52616f;
+    --accent:    #2ee6a8;
+    --accent-2:  #4c9aff;
+    --warn:      #ffb545;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+            "Liberation Mono", monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    background-image:
+      radial-gradient(900px 420px at 12% -10%, rgba(46,230,168,.07), transparent 60%),
+      radial-gradient(800px 400px at 88% 0%, rgba(76,154,255,.06), transparent 60%);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                 "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+    padding: 0 20px 64px;
+  }
+
+  .wrap { max-width: 1120px; margin: 0 auto; }
+
+  /* ---------- 头部 ---------- */
+  header { padding: 64px 0 40px; }
+
+  .brand {
+    display: flex; align-items: baseline; gap: 14px;
+    flex-wrap: wrap;
+  }
+  .brand h1 {
+    font-size: 34px; font-weight: 700; letter-spacing: -.5px;
+  }
+  .brand h1 .prompt { color: var(--accent); font-family: var(--mono); }
+  .brand .ver {
+    font-family: var(--mono); font-size: 12px; color: var(--text-mute);
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 3px 10px;
+  }
+
+  .lede {
+    margin-top: 14px; color: var(--text-dim); font-size: 15px; line-height: 1.7;
+    max-width: 640px;
+  }
+  .lede code {
+    font-family: var(--mono); font-size: 13px; color: var(--accent);
+    background: rgba(46,230,168,.08); padding: 1px 6px; border-radius: 4px;
+  }
+
+  /* ---------- 统计条 ---------- */
+  .stats {
+    display: flex; flex-wrap: wrap; gap: 28px;
+    margin-top: 32px; padding: 18px 22px;
+    background: var(--bg-soft);
+    border: 1px solid var(--line-soft); border-radius: 12px;
+  }
+  .stat .n {
+    font-family: var(--mono); font-size: 20px; font-weight: 600;
+    color: var(--text); line-height: 1.2;
+  }
+  .stat .k {
+    font-size: 11px; color: var(--text-mute); letter-spacing: .08em;
+    text-transform: uppercase; margin-top: 4px;
+  }
+
+  /* ---------- 命令块 ---------- */
+  .cmdbar {
+    margin-top: 20px; display: flex; align-items: center; gap: 12px;
+    background: #0c1219; border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px 16px;
+    font-family: var(--mono); font-size: 13.5px;
+    overflow-x: auto;
+  }
+  .cmdbar .sigil { color: var(--accent); user-select: none; }
+  .cmdbar .cmd { color: var(--text); white-space: nowrap; flex: 1; }
+  .cmdbar button {
+    background: transparent; border: 1px solid var(--line);
+    color: var(--text-dim); font-family: var(--mono); font-size: 11px;
+    padding: 5px 11px; border-radius: 6px; cursor: pointer;
+    transition: .15s; white-space: nowrap;
+  }
+  .cmdbar button:hover { color: var(--accent); border-color: var(--accent); }
+
+  /* ---------- 分区标题 ---------- */
+  .section-head {
+    display: flex; align-items: center; gap: 14px;
+    margin: 56px 0 22px;
+  }
+  .section-head h2 {
+    font-size: 13px; font-weight: 600; color: var(--text-mute);
+    letter-spacing: .14em; text-transform: uppercase;
+  }
+  .section-head .rule {
+    flex: 1; height: 1px; background: var(--line-soft);
+  }
+
+  /* ---------- 卡片网格 ---------- */
+  .grid {
+    display: grid; gap: 16px;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  }
+
+  .card {
+    position: relative;
+    display: flex; flex-direction: column;
+    background: var(--panel);
+    border: 1px solid var(--line-soft);
+    border-radius: 14px;
+    padding: 22px 22px 20px;
+    text-decoration: none; color: inherit;
+    transition: border-color .18s, transform .18s, background .18s;
+    overflow: hidden;
+  }
+  .card::before {
+    content: ""; position: absolute; inset: 0 0 auto 0; height: 2px;
+    background: linear-gradient(90deg, var(--accent), transparent 65%);
+    opacity: 0; transition: opacity .18s;
+  }
+  .card:hover {
+    border-color: var(--line);
+    background: var(--panel-2);
+    transform: translateY(-3px);
+  }
+  .card:hover::before { opacity: 1; }
+
+  .card.offline::before {
+    background: linear-gradient(90deg, var(--warn), transparent 65%);
+  }
+  .card.offline:hover { border-color: rgba(255,181,69,.35); }
+
+  .card-top {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 12px;
+  }
+  .idx {
+    font-family: var(--mono); font-size: 11px; color: var(--text-mute);
+    letter-spacing: .1em;
+  }
+  .badge {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: .06em;
+    padding: 3px 8px; border-radius: 999px; white-space: nowrap;
+  }
+  .badge.easy   { color: #63d9a0; background: rgba(99,217,160,.1); }
+  .badge.mid    { color: #58a6ff; background: rgba(88,166,255,.1); }
+  .badge.hard   { color: #ff8f6b; background: rgba(255,143,107,.1); }
+  .badge.ir     { color: #c48cff; background: rgba(196,140,255,.1); }
+  .badge.net    { color: #ffb545; background: rgba(255,181,69,.1); }
+
+  .card h3 {
+    margin-top: 16px; font-size: 19px; font-weight: 650;
+    letter-spacing: -.2px;
+  }
+  .card .sub {
+    margin-top: 7px; font-size: 13px; line-height: 1.65;
+    color: var(--text-dim); flex: 1;
+  }
+
+  .card-foot {
+    margin-top: 20px; padding-top: 15px;
+    border-top: 1px solid var(--line-soft);
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    font-family: var(--mono); font-size: 12px;
+  }
+  .port { color: var(--accent); }
+  .port.muted { color: var(--text-mute); }
+  .levels { color: var(--text-mute); font-size: 11.5px; }
+
+  .arrow {
+    color: var(--text-mute); transition: transform .18s, color .18s;
+    font-family: var(--mono);
+  }
+  .card:hover .arrow { color: var(--accent); transform: translateX(3px); }
+
+  /* ---------- 底部提示 ---------- */
+  .notice {
+    margin-top: 48px; padding: 20px 22px;
+    background: rgba(255,181,69,.045);
+    border: 1px solid rgba(255,181,69,.16);
+    border-left: 2px solid var(--warn);
+    border-radius: 10px;
+    font-size: 13px; line-height: 1.8; color: var(--text-dim);
+  }
+  .notice strong { color: var(--warn); font-weight: 600; }
+  .notice code {
+    font-family: var(--mono); font-size: 12px; color: var(--text);
+    background: rgba(255,255,255,.05); padding: 1px 6px; border-radius: 4px;
+  }
+
+  footer {
+    margin-top: 40px; padding-top: 24px;
+    border-top: 1px solid var(--line-soft);
+    display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+    font-family: var(--mono); font-size: 11.5px; color: var(--text-mute);
+  }
+  footer a { color: var(--text-mute); text-decoration: none; }
+  footer a:hover { color: var(--accent); }
+
+  @media (max-width: 640px) {
+    header { padding: 44px 0 28px; }
+    .brand h1 { font-size: 27px; }
+    .stats { gap: 20px; padding: 16px; }
+    .grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="brand">
+      <h1><span class="prompt">>_</span> SecLab</h1>
+      <span class="ver">v1.0 · docker</span>
+    </div>
+    <p class="lede">
+      一套跑在本地 Docker 里的安全练习环境。七个靶场覆盖 Web 漏洞、反序列化、
+      SSRF 协议利用、JWT 绕过、XXE 和应急响应，外加一个网络层的 ARP 欺骗实验。
+      全部只绑定 <code>127.0.0.1</code>，出不了这台机器。
+    </p>
+
+    <div class="stats">
+      <div class="stat"><div class="n">7</div><div class="k">靶场</div></div>
+      <div class="stat"><div class="n">19</div><div class="k">容器</div></div>
+      <div class="stat"><div class="n">36</div><div class="k">关卡 · 后门 · 实验</div></div>
+      <div class="stat"><div class="n">1</div><div class="k">条启动命令</div></div>
+    </div>
+
+    <div class="cmdbar">
+      <span class="sigil">$</span>
+      <span class="cmd" id="cmd-main">./lab.sh up</span>
+      <button type="button" onclick="copyCmd()">copy</button>
+    </div>
+  </header>
+
+  <div class="section-head">
+    <h2>靶场入口</h2>
+    <div class="rule"></div>
+  </div>
+
+  <div class="grid" id="grid"></div>
+
+  <div class="notice">
+    <strong>只在本地练。</strong>
+    这些容器里跑的是真实的漏洞代码，不要把端口暴露到公网或公司内网。
+    启动脚本默认绑定回环地址；改成 <code>LAB_BIND=0.0.0.0 ./lab.sh up</code>
+    会让同网段任何人都能访问，除非你清楚后果，否则别这么干。<br>
+    答案与完整解题思路见仓库里的 <code>docs/answers.md</code>，先自己做，卡住了再看。
+  </div>
+
+  <footer>
+    <span>SecLab · 本地安全练习环境</span>
+    <span>启动 / 停止：<a href="#" onclick="copyText('./lab.sh up  |  ./lab.sh down');return false;">./lab.sh up · ./lab.sh down</a></span>
+  </footer>
+
+</div>
+
+<script>
+// 靶场清单：port 为 null 表示不暴露 HTTP 端口（终端里操作）
+const LABS = [
+  {
+    id: "01", name: "DVWA",
+    sub: "经典的故意不安全站点。18 个漏洞模块，每个都能在 low / medium / high / impossible 四档之间切换看源码差异。SQL 注入、XSS、文件上传、命令执行都在这儿打基础。",
+    port: 8888, levels: "18 模块 · 4 档", badge: ["easy", "基础"], path: "/"
+  },
+  {
+    id: "02", name: "反序列化",
+    sub: "PHP 魔术方法与 POP 链、private 属性、phar 元数据，以及 Java commons-collections 的 CC6 链。三个容器对应三个运行时：PHP 8.1、PHP 7.4、JDK 8。",
+    port: 8890, levels: "PHP 4 关 + Java 1", badge: ["hard", "进阶"], path: "/"
+  },
+  {
+    id: "03", name: "XXE",
+    sub: "五关递进：有回显 → 盲打外带 → 报错型 → 内网 SSRF → SVG 上传。同一份 payload 在修复对照页里失效，差异看得见。",
+    port: 8895, levels: "5 关 + 修复对照", badge: ["mid", "Web"], path: "/"
+  },
+  {
+    id: "04", name: "Gopher SSRF",
+    sub: "从 RFC 1436 协议本体打到底层服务 RCE：读 Redis、写 Redis getshell、手拼 MySQL 握手包、构造 FastCGI 记录打 php-fpm。全部要借 web 容器的手。",
+    port: 8896, levels: "6 关", badge: ["hard", "进阶"], path: "/"
+  },
+  {
+    id: "05", name: "JWT",
+    sub: "同一个后台被四种方式打穿：弱密钥爆破、alg:none、RS256→HS256 算法混淆、kid 路径穿越。每次只改一个实现细节。",
+    port: 8898, levels: "4 关 + 修复对照", badge: ["mid", "Web"], path: "/"
+  },
+  {
+    id: "06", name: "webshell-hunt",
+    sub: "一台「已经被入侵」的 WordPress 站。9 处后门藏在 25 个文件里，配套真实访问日志。不给你入口，只给你一个 shell —— 练的是应急响应里的静态排查。",
+    port: 8899, levels: "9 后门 + 1 诱饵", badge: ["ir", "应急响应"], path: "/"
+  },
+  {
+    id: "07", name: "ARP 欺骗",
+    sub: "三容器组成的小型网络：网关、受害者、攻击机。从「为什么 arpspoof 跑了没反应」开始，做到完整中间人、抓明文凭据、再自己做检测。需要在终端里操作。",
+    port: null, levels: "7 个实验", badge: ["net", "网络"], cmd: "./lab.sh up all"
+  }
+];
+
+const grid = document.getElementById("grid");
+const host = location.hostname || "127.0.0.1";
+
+grid.innerHTML = LABS.map(l => {
+  const href = l.port ? `http://${host}:${l.port}${l.path || "/"}` : null;
+  const tag = href ? "a" : "div";
+  const attrs = href ? `href="${href}" target="_blank" rel="noopener"` : "";
+  const portTxt = l.port
+    ? `:${l.port}`
+    : `<span title="${l.cmd}">终端实验</span>`;
+  const portCls = l.port ? "port" : "port muted";
+  const arrow = href ? "→" : "↓";
+  return `
+  <${tag} class="card ${href ? "" : "offline"}" ${attrs}>
+    <div class="card-top">
+      <span class="idx">${l.id} / 07</span>
+      <span class="badge ${l.badge[0]}">${l.badge[1]}</span>
+    </div>
+    <h3>${l.name}</h3>
+    <p class="sub">${l.sub}</p>
+    <div class="card-foot">
+      <span class="${portCls}">${portTxt}</span>
+      <span class="levels">${l.levels}</span>
+      <span class="arrow">${arrow}</span>
+    </div>
+  </${tag}>`;
+}).join("");
+
+function copyText(t) {
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(t).then(() => flash("已复制"));
+  } else {
+    const ta = document.createElement("textarea");
+    ta.value = t; document.body.appendChild(ta); ta.select();
+    document.execCommand("copy"); ta.remove(); flash("已复制");
+  }
+}
+function copyCmd() { copyText("./lab.sh up"); }
+function flash(msg) {
+  const btn = document.querySelector(".cmdbar button");
+  const old = btn.textContent;
+  btn.textContent = msg;
+  setTimeout(() => { btn.textContent = old; }, 1200);
+}
+</script>
+</body>
+</html>
