@@ -355,3 +355,7 @@ MIT。见 [LICENSE](LICENSE)。
 
 靶场代码用于教学，欢迎拿去改。如果发现关卡设计有问题（比如某关存在
 非预期解法），开 issue 说明复现步骤。
+
+---
+
+作者：[lyh-blogs.top](https://lyh-blogs.top) · [GitHub @LYH-creative](https://github.com/LYH-creative)
