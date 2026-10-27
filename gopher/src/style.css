@@ -76,6 +76,11 @@ h3 { font-size: 15px; margin: 20px 0 8px; }
 }
 
 .card {
+  /* 卡片在 HTML 里是 <a>，而 <a> 默认是 inline。
+     不显式转成 block 的话，边框/背景会按 inline 盒绘制：
+     每一行文字的首尾都会断开重绘，边框正好压在描述行的行首，
+     看起来像一堆乱码（Windows/Mac 都一样，不是字体问题）。 */
+  display: block;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 10px;
