@@ -54,7 +54,7 @@ $ ./lab.sh up
 ### 1. 下载
 
 ```bash
-git clone <本仓库地址> sec-lab
+git clone https://github.com/LYH-creative/sec-lab.git
 cd sec-lab
 ```
 
