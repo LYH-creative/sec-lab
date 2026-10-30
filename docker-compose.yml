@@ -412,6 +412,69 @@ services:
       arp-net:
         ipv4_address: 172.28.0.4
 
+  # ===========================================================================
+  #  8. Sandbox Escape —— 沙箱逃逸六关
+  #     L1~L4 是语言/系统调用级沙箱（vm / 黑名单 / pickle / chroot），
+  #     L5 挂着 docker.sock，L6 是 privileged + pid=host。
+  #     后两个是真的容器逃逸入口，只在本地跑。
+  # ===========================================================================
+  sbox-web:
+    build: ./sandbox-escape
+    image: sec-lab/sandbox-escape:1.0
+    container_name: sbox-web
+    <<: *default-restart
+    ports:
+      - "${LAB_BIND:-127.0.0.1}:8900:8900"
+    volumes:
+      - ./sandbox-escape/src:/app
+      - ./sandbox-escape/src/jail:/jail:ro
+      - ./sandbox-escape/flags/l1.flag:/flag_l1:ro
+      - ./sandbox-escape/flags/l2.flag:/flag_l2:ro
+      - ./sandbox-escape/flags/l3.flag:/flag_l3:ro
+      - ./sandbox-escape/flags/l4.flag:/flag_l4:ro
+    logging: *default-logging
+    networks:
+      - sbox-net
+
+  # L5 的入口：为了跑 CI 把宿主 socket 挂了进来（故意的错误配置）
+  sbox-sock:
+    build: ./sandbox-escape/sock
+    image: sec-lab/sandbox-escape-sock:1.0
+    container_name: sbox-sock
+    <<: *default-restart
+    command: ["sleep", "infinity"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    logging: *default-logging
+    networks:
+      - sbox-net
+
+  # L5 的靶子：不开端口，只能通过 socket 摸进来
+  sbox-vault:
+    image: sec-lab/sandbox-escape:1.0
+    pull_policy: never
+    container_name: sbox-vault
+    <<: *default-restart
+    command: ["sleep", "infinity"]
+    volumes:
+      - ./sandbox-escape/flags/l5.flag:/flag_l5:ro
+    logging: *default-logging
+    networks:
+      - sbox-net
+
+  # L6 的入口：运维版的「方便排障」，两个参数凑成一次宿主逃逸
+  sbox-priv:
+    image: sec-lab/sandbox-escape:1.0
+    pull_policy: never
+    container_name: sbox-priv
+    <<: *default-restart
+    command: ["sleep", "infinity"]
+    privileged: true
+    pid: host
+    logging: *default-logging
+    networks:
+      - sbox-net
+
 # =============================================================================
 #  网络：一个靶场一个，互不可见
 # =============================================================================
@@ -429,6 +492,8 @@ networks:
   jwt-net:
     driver: bridge
   hunt-net:
+    driver: bridge
+  sbox-net:
     driver: bridge
   arp-net:
     driver: bridge

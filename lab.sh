@@ -61,6 +61,7 @@ preflight() {
 ALL_CONTAINERS="lab-portal dvwa dvwa-db deser-php deser-php74 deser-java
 xxe-web xxe-internal gopher-web gopher-legacy-public gopher-legacy-internal
 gopher-redis gopher-db gopher-fpm jwt-web webshell-hunt
+sbox-web sbox-sock sbox-vault sbox-priv
 arp-gw arp-victim arp-attacker"
 
 cleanup_conflicts() {
@@ -185,6 +186,23 @@ SQL
             warn "没有 python3，DVWA 需手动打开 http://127.0.0.1:8888/setup.php 点一下按钮"
         fi
     fi
+
+    # ---- 4. Sandbox Escape L6：flag 必须在「容器看不到、宿主看得到」的位置，
+    # 否则 /proc/1/root 那关就没意义了。借一个挂了宿主 / 的一次性容器写进去。
+    # macOS / Windows 上写的是 Docker Desktop 的 VM 根，不碰 macOS；
+    # Linux 上是真宿主，只多一个 /lab-escape 目录（sandbox-escape/setup.sh --clean 可删）。
+    if docker image inspect sec-lab/sandbox-escape:1.0 >/dev/null 2>&1; then
+        if docker run --rm \
+                -v /:/host \
+                -v "$ROOT/sandbox-escape/flags/l6.flag:/src/l6.flag:ro" \
+                --entrypoint sh sec-lab/sandbox-escape:1.0 -c \
+                "mkdir -p /host/lab-escape && cp /src/l6.flag /host/lab-escape/l6.flag && chmod 644 /host/lab-escape/l6.flag" \
+                >/dev/null 2>&1; then
+            ok "sandbox L6 flag 已铺到宿主 /lab-escape/"
+        else
+            warn "sandbox L6 flag 铺设失败，L6 会读不到文件"
+        fi
+    fi
 }
 
 # =============================================================================
@@ -203,13 +221,30 @@ cmd_up() {
     fi
 
     info "构建并启动容器（首次需要拉镜像 + 构建，视网络 5~10 分钟）……"
-    # shellcheck disable=SC2086
-    if ! $DC $profile_args up -d --build; then
-        warn "默认构建器失败，改用经典 builder 重试一次（常见于 buildx 写 ~/.docker 受限）"
+
+    # 三级回退。构建失败在不同机器上原因完全不同，别只赌一种：
+    #   1. 默认 buildx —— 大多数环境这一层就过了
+    #   2. buildx 写不了 ~/.docker/buildx（受限工作目录、CI 容器里跑）
+    #      时，只是状态目录没权限，把它挪到临时目录就行，速度不变
+    #   3. 还不行才退经典 builder —— 慢，但不依赖 buildx
+    # 注意第 3 层在部分环境会"不报错地卡住"（没有任何输出），
+    # 所以它必须排在最后。
+    build_up() {
+        local cfg
         # shellcheck disable=SC2086
-        DOCKER_BUILDKIT=0 $DC $profile_args up -d --build \
-            || die "启动失败。跑 ./lab.sh logs 看具体报错。"
-    fi
+        $DC $profile_args up -d --build && return 0
+
+        cfg="$(mktemp -d)/buildx"
+        warn "默认构建器失败，改用临时 buildx 状态目录重试（常见于 ~/.docker 不可写）"
+        # shellcheck disable=SC2086
+        BUILDX_CONFIG="$cfg" $DC $profile_args up -d --build && return 0
+
+        warn "仍然失败，退回经典 builder（会慢一些）"
+        # shellcheck disable=SC2086
+        DOCKER_BUILDKIT=0 $DC $profile_args up -d --build
+    }
+
+    build_up || die "启动失败。跑 ./lab.sh logs 看具体报错。"
 
     echo
     seed
@@ -231,6 +266,9 @@ print_banner() {
     printf '  Gopher SSRF   http://127.0.0.1:8896/        %s另有 gopher://127.0.0.1:7070%s\n' "$C_DIM" "$C_0"
     printf '  JWT           http://127.0.0.1:8898/        %salice / alice123%s\n' "$C_DIM" "$C_0"
     printf '  webshell-hunt http://127.0.0.1:8899/        %sdocker exec -it webshell-hunt bash%s\n' "$C_DIM" "$C_0"
+    printf '  Sandbox Escape http://127.0.0.1:8900/       %sL1~L4 页面 · L5/L6 终端%s\n' "$C_DIM" "$C_0"
+    printf '                %sdocker exec -it sbox-sock bash%s  %s/  %sdocker exec -it sbox-priv bash%s\n' \
+        "$C_DIM" "$C_0" "$C_DIM" "$C_DIM" "$C_0"
     if [ "$scope" = "all" ]; then
         printf '  ARP           终端实验，见 %sarp/README.md%s\n' "$C_DIM" "$C_0"
     else
@@ -259,8 +297,10 @@ cmd_status() {
     echo
     info "宿主机监听端口："
     if command -v lsof >/dev/null 2>&1; then
+        # 注意 macOS 的 lsof 输出形如 "127.0.0.1:8900 (LISTEN)"，
+        # 端口后面还有 "(LISTEN)"，所以不能用 $ 锚定行尾
         lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null \
-            | awk 'NR==1 || /:(8880|8888|8890|8891|8892|8895|8896|8898|8899|7070)$/' \
+            | awk 'NR==1 || /:(8880|8888|8890|8891|8892|8895|8896|8898|8899|8900|7070)( |$)/' \
             | sed 's/^/    /' || true
     fi
 }
@@ -315,6 +355,14 @@ cmd_reset() {
         find "$d" -mindepth 1 ! -name '.gitkeep' -delete 2>/dev/null || true
     done
 
+    # Sandbox Escape 的 L6 flag 在宿主根目录（容器外），down -v 清不到，
+    # 借一个挂了宿主 / 的一次性容器删掉
+    if docker image inspect sec-lab/sandbox-escape:1.0 >/dev/null 2>&1; then
+        docker run --rm -v /:/host --entrypoint sh sec-lab/sandbox-escape:1.0 \
+            -c 'rm -rf /host/lab-escape' >/dev/null 2>&1 \
+            && info "已清理宿主上的 /lab-escape（L6 的 flag）"
+    fi
+
     cmd_up all
 }
 
@@ -326,7 +374,7 @@ cmd_answer() {
         # 没指定靶场：只打印最上面的 flag 汇总表
         awk '/^## 一、flag 总表/{f=1} f&&/^## /&&!/flag 总表/{exit} f' "$f"
         echo
-        info "看某一关的完整思路：./lab.sh answer <dvwa|deser|xxe|gopher|jwt|hunt|arp>"
+        info "看某一关的完整思路：./lab.sh answer <dvwa|deser|xxe|gopher|jwt|hunt|escape|arp>"
         return 0
     fi
 
@@ -337,6 +385,7 @@ cmd_answer() {
         gopher|ssrf|Gopher)             pat="Gopher" ;;
         jwt|JWT)                        pat="JWT" ;;
         hunt|webshell|webshell-hunt)    pat="webshell-hunt" ;;
+        escape|sandbox|sbox|沙箱)       pat="Sandbox Escape" ;;
         arp|ARP)                        pat="ARP" ;;
         dvwa|DVWA)                      pat="DVWA" ;;
     esac

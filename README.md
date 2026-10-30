@@ -1,10 +1,10 @@
 # SecLab · 安全靶场合集
 
-七个靶场、19 个容器（默认启动 16 个，ARP 按需），一条命令全起来，
+八个靶场、23 个容器（默认启动 20 个，ARP 按需），一条命令全起来，
 全部只绑本机 `127.0.0.1`。
 
 覆盖 Web 常规漏洞、PHP / Java 反序列化、XXE、Gopher SSRF、JWT 绕过、
-webshell 应急排查，以及网络层的 ARP 欺骗。每个靶场都自带纯标准库的
+webshell 应急排查、沙箱逃逸，以及网络层的 ARP 欺骗。每个靶场都自带纯标准库的
 验证脚本——先自己做，卡住了再拿来对答案。
 
 ```
@@ -13,10 +13,12 @@ $ ./lab.sh up
 [+] gopher L5 flag 已写入 MySQL
 [+] gopher L3 flag 已写入 Redis
 [+] DVWA 数据库已初始化
+[+] sandbox L6 flag 已铺到宿主 /lab-escape/
 
   导航页        http://127.0.0.1:8880/
   DVWA          http://127.0.0.1:8888/        admin / password
   ...
+  Sandbox Escape http://127.0.0.1:8900/       L1~L4 页面 · L5/L6 终端
 ```
 
 ---
@@ -32,17 +34,18 @@ $ ./lab.sh up
 | 4 | **Gopher SSRF** | http://127.0.0.1:8896/ | 6 关，打通 Redis / MySQL / php-fpm | 进阶 |
 | 5 | **JWT** | http://127.0.0.1:8898/ | 4 关 + 修复对照 | 中 |
 | 6 | **webshell-hunt** | http://127.0.0.1:8899/ | 9 处后门 + 1 处诱饵 | 应急响应 |
-| 7 | **ARP 欺骗** | 终端 | 7 个实验，完整中间人 | 网络 |
+| 7 | **Sandbox Escape** | http://127.0.0.1:8900/ | 沙箱逃逸 6 关（语言级 4 + 容器级 2） | 进阶 |
+| 8 | **ARP 欺骗** | 终端 | 7 个实验，完整中间人 | 网络 |
 
-合计 36 个关卡 / 后门 / 实验。
+合计 42 个关卡 / 后门 / 实验。
 
 ---
 
 ## 环境要求
 
 - **Docker Engine 20.10+**，含 **Compose v2**（`docker compose`，不是老的 `docker-compose`）
-- 内存建议 **4 GB 以上**给 Docker（16 个容器同时跑）
-- 磁盘 **5 GB** 左右（镜像 + 数据库卷）
+- 内存建议 **6 GB 以上**给 Docker（20 个容器同时跑）
+- 磁盘 **6 GB** 左右（镜像 + 数据库卷）
 - 首次启动需要联网拉镜像、构建镜像（Java 那个还要从 Maven Central 下 jar）
 
 支持 macOS（Intel / Apple Silicon）、Linux、Windows（WSL2 或 Git Bash）。
@@ -173,6 +176,27 @@ cd /var/www/html && ls -la
 **别急着开浏览器点**，那会污染 `access.log`——日志本身是第一证据源。
 排查七步法和完整答案在 `webshell-hunt/answer/ANSWERS.md`。
 
+### Sandbox Escape · 8900
+
+六关，六种隔离手段，六个洞。前四关在页面里直接打（Node `vm`、Python
+关键字黑名单、pickle 白名单、chroot），后两关是真正的容器逃逸：
+
+```bash
+docker exec -it sbox-sock bash     # L5：容器里挂着宿主的 docker.sock
+docker exec -it sbox-priv bash     # L6：privileged + pid=host
+```
+
+L5 的目标容器 `sbox-vault` 不开端口、不给 shell，只能从 socket 摸进去；
+L6 的 flag 在宿主根目录 `/lab-escape/`，容器自己的 `/` 里看不到。
+
+```bash
+python3 sandbox-escape/poc/verify.py    # L1~L4 一键验证
+```
+
+**注意**：L5 挂的是宿主机真实的 docker.sock，等于把 Docker 的完整控制权
+交出去；L6 会往宿主根目录写一个 `/lab-escape/`。只在你自己机器上跑，
+清理由 `sandbox-escape/setup.sh --clean` 负责。
+
 ### ARP 欺骗 · 终端
 
 ```bash
@@ -201,6 +225,7 @@ docker exec -it arp-victim ip neigh
 | 8896 | gopher-web | Gopher 六关 |
 | 8898 | jwt-web | JWT 四关 |
 | 8899 | webshell-hunt | 应急响应 |
+| 8900 | sbox-web | 沙箱逃逸 L1~L4 |
 | 7070 | gopher-legacy-public | L1 的 gopher 靶子 |
 
 端口被占用时，改 `docker-compose.yml` 里对应服务的 `ports` 左侧数字即可。
@@ -225,7 +250,8 @@ sec-lab/
 ├── gopher/                # 4. Gopher SSRF 六关
 ├── jwt/                   # 5. JWT 四关
 ├── webshell-hunt/         # 6. webshell 排查
-└── arp/                   # 7. ARP 欺骗
+├── sandbox-escape/        # 7. 沙箱逃逸六关
+└── arp/                   # 8. ARP 欺骗
 ```
 
 每个靶场目录都保留了自己的 `compose.yml`，可以单独启动（见下一节）。
@@ -240,6 +266,7 @@ sec-lab/
 cd xxe && ./setup.sh          # 或 docker compose up -d --build
 cd gopher && ./setup.sh       # 这个会顺带灌 flag
 cd jwt && ./setup.sh
+cd sandbox-escape && ./setup.sh    # 这个会顺带把 L6 的 flag 铺到宿主
 cd dvwa && ./dvwa.sh up
 cd arp && ./run.sh
 cd webshell-hunt && ./reset.sh
@@ -257,9 +284,32 @@ cd webshell-hunt && ./reset.sh
 首次要拉 nginx、mariadb、redis、python、php 等多个基础镜像，加上构建
 PHP 和 Java 靶场。国内网络可以给 Docker 配镜像加速器。第二次启动是秒级。
 
-**Q：构建报 `buildx: ... operation not permitted`。**
-`lab.sh` 会自动用 `DOCKER_BUILDKIT=0` 重试一次。仍失败的话，先确认
-`~/.docker` 可写（`ls -ld ~/.docker`），或者手动 `DOCKER_BUILDKIT=0 docker compose up -d --build`。
+**Q：构建报 `buildx: ... operation not permitted`，或者构建一路无输出、像卡住了。**
+两种不同的问题，`lab.sh` 现在按顺序试三层：
+
+1. 默认 buildx；
+2. `BUILDX_CONFIG` 指到临时目录再试 —— 大部分"operation not permitted"
+   都是 buildx 写不了 `~/.docker/buildx`（受限工作目录、在容器里跑），
+   换个状态目录就好，速度不变；
+3. 最后才退 `DOCKER_BUILDKIT=0`（经典 builder）。这一层在部分环境下
+   **不报错也不输出，直接挂着**，所以它排在最后。
+
+想手动复现第 2 层：
+
+```bash
+BUILDX_CONFIG=$(mktemp -d)/buildx docker compose up -d --build
+```
+
+**Q：Sandbox Escape 的 L6 读不到 `/lab-escape/l6.flag`。**
+这个 flag 不在容器里，是 `./lab.sh init`（或 `up`）时用一次性容器铺到
+宿主根目录的。纯 `docker compose up` 启动不会有它，补跑一次初始化：
+
+```bash
+./lab.sh init
+docker exec sbox-priv cat /proc/1/root/lab-escape/l6.flag
+```
+
+macOS / Windows 上这里的"宿主"是 Docker Desktop 的 Linux VM。
 
 **Q：DVWA 页面报 `Could not connect to the database` / 提示建库。**
 数据库容器还在初始化，等 10 秒刷新；或者 `./lab.sh init` 重跑初始化。
@@ -329,6 +379,12 @@ docker rm -f dvwa dvwa-db deser-php xxe-web jwt-web webshell-hunt gopher-web
   **不要**把端口暴露到公网、公司内网或任何非你控制的环境。
 - 这些环境仅用于本地学习与**获得授权**的测试。
   对任何未授权的系统使用其中的技术，后果自负。
+- **Sandbox Escape 这一套比别的靶场更"出圈"**：
+  `sbox-sock` 挂载了宿主真实的 `docker.sock`（连上就等于 root@宿主，
+  能起 `--privileged -v /:/host` 的容器），`sbox-priv` 是 `privileged` + `pid: host`，
+  而 L6 会往宿主根目录写 `/lab-escape/`。别在有多人使用或存有重要数据的
+  机器上跑；清理用 `sandbox-escape/setup.sh --clean`。
+  macOS / Windows 上这些"宿主"是 Docker Desktop 的 Linux VM，不碰你的 macOS。
 - DVWA 镜像是第三方项目（`ghcr.io/digininja/dvwa`），其余代码在本仓库内。
 
 ---

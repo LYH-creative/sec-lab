@@ -1,0 +1,69 @@
+# =============================================================================
+#  Sandbox Escape Lab —— 单靶场编排
+# =============================================================================
+#  四个容器，各自承担一个「真实世界里的错误配置」：
+#
+#    sbox-web    在线跑代码的平台（L1~L4 的语言级沙箱都在这里，root 运行）
+#    sbox-sock   挂载了宿主机 docker.sock 的 CI runner（L5 的入口）
+#    sbox-vault  没端口没 shell 的靶子容器，只放一个 /flag_l5（L5 的目标）
+#    sbox-priv   privileged + pid=host 的「排障容器」（L6 的入口）
+#
+#  L6 的 flag 不在任何一个容器里，它在**宿主根目录** /lab-escape/l6.flag，
+#  由 setup.sh / ./lab.sh init 铺进去（macOS 上是 Docker Desktop 的 VM 根，
+#  Linux 上是真宿主 —— 请注意这一点，别在重要机器上乱跑）。
+# =============================================================================
+
+name: sandbox-escape
+
+services:
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sec-lab/sandbox-escape:1.0
+    container_name: sbox-web
+    ports:
+      - "127.0.0.1:8900:8900"
+    volumes:
+      # 源码挂进来，改页面/关卡代码不用重建镜像
+      - ./src:/app
+      # chroot 的「牢房」单独挂，方便你改里面的东西
+      - ./src/jail:/jail:ro
+      - ./flags/l1.flag:/flag_l1:ro
+      - ./flags/l2.flag:/flag_l2:ro
+      - ./flags/l3.flag:/flag_l3:ro
+      - ./flags/l4.flag:/flag_l4:ro
+    restart: unless-stopped
+
+  # L5：模拟「为了跑 CI，把 docker.sock 挂进容器」
+  sock:
+    build:
+      context: ./sock
+      dockerfile: Dockerfile
+    image: sec-lab/sandbox-escape-sock:1.0
+    container_name: sbox-sock
+    command: ["sleep", "infinity"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+
+  # L5 的靶子：不给端口、不给入口，只能通过 socket 摸进来
+  vault:
+    image: sec-lab/sandbox-escape:1.0
+    pull_policy: never
+    container_name: sbox-vault
+    command: ["sleep", "infinity"]
+    volumes:
+      - ./flags/l5.flag:/flag_l5:ro
+    restart: unless-stopped
+
+  # L6：运维为了「方便排障」加的两个参数，正好凑成一次完整的宿主逃逸
+  priv:
+    image: sec-lab/sandbox-escape:1.0
+    pull_policy: never
+    container_name: sbox-priv
+    command: ["sleep", "infinity"]
+    privileged: true
+    pid: host
+    restart: unless-stopped

@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sandbox Escape Lab · 沙箱逃逸靶场</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="brand">
+      <h1><span class="prompt">$</span> Sandbox Escape Lab</h1>
+      <span class="ver">v1.0 · 6 levels</span>
+    </div>
+    <p class="lede">
+      一个「在线跑代码」的平台，每一关都用了不同的隔离手段，每一关都有洞。
+      任务是<strong>从沙箱里逃出去</strong>，读走对应的 flag。
+      L1~L4 直接在页面上打，L5 / L6 要进容器（页面上给了命令）。
+    </p>
+    <div class="stats">
+      <div class="stat"><div class="n">6</div><div class="k">关卡</div></div>
+      <div class="stat"><div class="n">4</div><div class="k">语言级沙箱</div></div>
+      <div class="stat"><div class="n">2</div><div class="k">容器级逃逸</div></div>
+      <div class="stat"><div class="n">root</div><div class="k">沙箱进程身份</div></div>
+    </div>
+  </header>
+
+  <!-- ===================== L1 ===================== -->
+  <section class="card">
+    <div class="head">
+      <span class="lvl">L1</span>
+      <div>
+        <h2>Node.js vm —— 语言级沙箱的经典误区</h2>
+        <div class="sub">javascript · vm.createContext</div>
+      </div>
+      <span class="badge">目标 /flag_l1</span>
+    </div>
+    <p class="desc">
+      平台用 <code>vm.createContext()</code> 造了个「干净上下文」，里面没有
+      <code>process</code>、<code>require</code>、<code>Buffer</code>，只给了你一个
+      <code>print()</code>。代码的最后一行会被当成结果打印出来。
+      <br>但 Node 官方文档写着：<em>vm 不是安全机制</em>。为什么？
+    </p>
+    <textarea id="ta-l1" spellcheck="false"></textarea>
+    <div class="row">
+      <button data-run="l1">运行</button>
+      <button class="ghost" data-reset="l1">载入示例</button>
+      <a class="src" href="/source/l1" target="_blank">看沙箱源码 →</a>
+    </div>
+    <pre class="out" id="out-l1">（输出会显示在这里）</pre>
+    <details>
+      <summary>提示（卡住再看）</summary>
+      <p>
+        沙箱里的对象，本质上还是<strong>宿主 node 进程那个 realm 的对象</strong>。
+        随便拿一个字面量的 <code>constructor</code>，再取它的 <code>constructor</code>，
+        拿到的是什么？那玩意儿 new 出来的函数，作用域链最顶上是谁？
+      </p>
+    </details>
+  </section>
+
+  <!-- ===================== L2 ===================== -->
+  <section class="card">
+    <div class="head">
+      <span class="lvl">L2</span>
+      <div>
+        <h2>Python 关键字黑名单 —— 只拦得住字面量</h2>
+        <div class="sub">python · 子串黑名单 + 阉割 builtins</div>
+      </div>
+      <span class="badge">目标 /flag_l2</span>
+    </div>
+    <p class="desc">
+      管理员写了 11 个关键字黑名单，还把 <code>builtins</code> 削成了计算器该有的样子。
+      只要你的代码里出现黑名单里的词，直接拒执行。
+      <br>但黑名单里<strong>漏了一个函数</strong>—— 那个函数能把「运行时拼出来的字符串」当属性名用。
+    </p>
+    <textarea id="ta-l2" spellcheck="false"></textarea>
+    <div class="row">
+      <button data-run="l2">运行</button>
+      <button class="ghost" data-reset="l2">载入示例</button>
+      <a class="src" href="/source/l2" target="_blank">看黑名单 →</a>
+    </div>
+    <pre class="out" id="out-l2">（输出会显示在这里）</pre>
+    <details>
+      <summary>提示（卡住再看）</summary>
+      <p>
+        黑名单挡的是 <code>__class__</code> 这个<strong>字符串</strong>，
+        但你完全可以写 <code>'_' + '_class_' + '_'</code> 拼出来。
+        拼出来之后，用哪个「没被拉黑」的内置函数把它当属性名取出来？
+        然后：<code>tuple → __bases__ → object → __subclasses__</code>，
+        在那一长串子类里找一个 <code>__init__.__globals__</code> 里有
+        <code>system</code> 的类。
+        <br>注意黑名单扫的是<strong>全文</strong> —— 注释、字符串、变量名里出现
+        连续两个下划线都会被拒。推荐先用 <code>d = '_' * 2</code> 把下划线存起来，
+        后面全用 <code>d</code>，源码里就不会出现那个词了。
+      </p>
+    </details>
+  </section>
+
+  <!-- ===================== L3 ===================== -->
+  <section class="card">
+    <div class="head">
+      <span class="lvl">L3</span>
+      <div>
+        <h2>pickle 反序列化 —— 白名单只校验了模块名</h2>
+        <div class="sub">python · pickle · find_class</div>
+      </div>
+      <span class="badge">目标 /flag_l3</span>
+    </div>
+    <p class="desc">
+      接口收 base64 的 pickle 数据，用自定义 <code>find_class</code> 卡住了模块名：
+      只有业务模块 <code>models</code> 被放行。看起来没问题。
+      <br>但 <code>STACK_GLOBAL</code> 压上来的是<strong>两个字符串</strong>：module 和 name。
+      name 是限定名，可以带点号。
+    </p>
+    <textarea id="ta-l3" spellcheck="false" placeholder="base64 的 pickle 数据"></textarea>
+    <div class="row">
+      <button data-run="l3">反序列化</button>
+      <button class="ghost" data-reset="l3">载入示例</button>
+      <a class="src" href="/source/l3" target="_blank">看白名单实现 →</a>
+      <a class="src" href="/source/l3-models" target="_blank">看 models.py →</a>
+    </div>
+    <pre class="out" id="out-l3">（输出会显示在这里）</pre>
+    <details>
+      <summary>提示（卡住再看）</summary>
+      <p>
+        白名单校验的是 <code>module</code>。那如果 module 写 <code>models</code>、
+        name 写 <code>subprocess.check_output</code> 呢？
+        <code>super().find_class()</code> 会按点号一层层取属性 ——
+        而 <code>models.py</code> 顶部正好 import 了 subprocess。
+        <br>载荷要自己拼字节，用 <code>pickletools.dis()</code> 看着调最快。
+      </p>
+    </details>
+  </section>
+
+  <!-- ===================== L4 ===================== -->
+  <section class="card">
+    <div class="head">
+      <span class="lvl">L4</span>
+      <div>
+        <h2>chroot —— 只改视野，不回收句柄</h2>
+        <div class="sub">python · chroot + 继承的 fd</div>
+      </div>
+      <span class="badge">目标 /flag_l4</span>
+    </div>
+    <p class="desc">
+      沙箱用 <code>chroot("/jail")</code> 把你关起来，之后 <code>/</code> 就是
+      <code>/jail</code>。flag 在 <code>/flag_l4</code>，jail 外面。
+      <br>但父进程为了把审计日志写到容器外，<strong>提前打开了 <code>/</code>
+      并以 fd 3 传了进来</strong>。这个 fd 就是出口。
+    </p>
+    <textarea id="ta-l4" spellcheck="false"></textarea>
+    <div class="row">
+      <button data-run="l4">运行</button>
+      <button class="ghost" data-reset="l4">载入示例</button>
+      <a class="src" href="/source/l4" target="_blank">看沙箱源码 →</a>
+    </div>
+    <pre class="out" id="out-l4">（输出会显示在这里）</pre>
+    <details>
+      <summary>提示（卡住再看）</summary>
+      <p>
+        <code>fchdir</code> 可以把 cwd 挪到任意一个<strong>已打开的目录 fd</strong> 上。
+        挪出去之后，再 <code>chroot(".")</code> 把根也挪出去 —— 因为进程还是 root，
+        这个操作没人拦你。最后 <code>chdir("/")</code> 刷新一下 cwd 就能读 flag 了。
+      </p>
+    </details>
+  </section>
+
+  <!-- ===================== L5 ===================== -->
+  <section class="card wide">
+    <div class="head">
+      <span class="lvl term">L5</span>
+      <div>
+        <h2>Docker Socket —— 挂进来的 socket 就是宿主的门</h2>
+        <div class="sub">container · /var/run/docker.sock</div>
+      </div>
+      <span class="badge">目标 /flag_l5（在 sbox-vault 里）</span>
+    </div>
+    <p class="desc">
+      <code>sbox-sock</code> 是个「CI Runner」容器，为了跑自动部署，把宿主机的
+      <code>/var/run/docker.sock</code> 挂了进来。同网络里还有个
+      <code>sbox-vault</code>：没开端口、没给 shell，只放了一个 <code>/flag_l5</code>。
+      <br>现在，从 runner 里把那个 flag 拿出来。
+    </p>
+    <pre class="cmd"><span class="c"># 入口：拿到 runner 里的 shell</span>
+docker exec -it sbox-sock bash
+
+<span class="c"># 你手上有 docker CLI，也有 curl + python3</span>
+docker ps
+curl --unix-socket /var/run/docker.sock http://localhost/containers/json</pre>
+    <details>
+      <summary>提示（卡住再看）</summary>
+      <p>
+        能连上 socket，就等于拿到了 <strong>root@宿主机</strong> —— 起容器、进容器、
+        挂宿主机目录，全都不用密码。最简单的验证：直接对 vault 下一条
+        <code>exec</code> 指令。想理解原理就别用 CLI，用
+        <code>POST /containers/{id}/exec</code> + <code>POST /exec/{id}/start</code>
+        自己拼一遍。
+      </p>
+    </details>
+  </section>
+
+  <!-- ===================== L6 ===================== -->
+  <section class="card wide">
+    <div class="head">
+      <span class="lvl term">L6</span>
+      <div>
+        <h2>privileged + hostPID —— 共享命名空间就没有边界</h2>
+        <div class="sub">container · --privileged --pid=host</div>
+      </div>
+      <span class="badge">目标 /lab-escape/l6.flag（宿主根目录）</span>
+    </div>
+    <p class="desc">
+      <code>sbox-priv</code> 的启动参数是运维为了「方便排障」加上的：
+      <code>privileged: true</code> + <code>pid: host</code>。
+      flag 被放在<strong>宿主根文件系统</strong>的 <code>/lab-escape/l6.flag</code>，
+      容器自己的 <code>/</code> 里没有这个文件。
+      <br>在容器里看到的是宿主的 PID 命名空间 —— 那 <code>/proc/1/root</code> 是什么？
+    </p>
+    <pre class="cmd"><span class="c"># 入口：进特权容器</span>
+docker exec -it sbox-priv bash
+
+<span class="c"># 先确认自己在哪：/proc 里应该是宿主那 300 多个进程</span>
+ls /proc | grep -E '^[0-9]+$' | wc -l
+cat /proc/1/cmdline; echo   <span class="c"># /initd —— Docker Desktop 的 VM init，不是你的容器</span>
+
+ls /lab-escape 2>&1         <span class="c"># 没有 —— 不在容器的 rootfs 里</span>
+cat /proc/1/root/lab-escape/l6.flag</pre>
+    <details>
+      <summary>提示（卡住再看）</summary>
+      <p>
+        <code>--pid=host</code> 让容器看见宿主的进程表，<code>--privileged</code>
+        给了足够的 capability 去穿过 <code>/proc</code>。
+        于是 <code>/proc/1/root</code> 就是<strong>宿主 PID 1 的根目录</strong>。
+        等价的另一条路是用 <code>nsenter -t 1 -m -u -i -n -p</code> 直接进宿主的各个命名空间。
+        <br>macOS / Windows 上你逃到的是 Docker Desktop 的 Linux VM，不是 macOS 本身 ——
+        这恰恰说明容器不是虚拟机。
+      </p>
+    </details>
+  </section>
+
+  <footer>
+    <span>答案：<code>./lab.sh answer escape</code></span>
+    <span>原理：<code>sandbox-escape/README.md</code></span>
+    <span>仅限本地实验环境</span>
+  </footer>
+
+</div>
+
+<script>
+// =============================================================================
+//  前端逻辑：极简，无框架。每个关卡一张卡片，POST /api/run/<level>。
+// =============================================================================
+
+const SAMPLES = {
+  l1: `// 先试试正常用法
+print("hello from vm");
+1 + 1`,
+  l2: `# 先试试正常用法（打印能用的内置函数）
+print("hello " + str(2 ** 10))
+print(sorted(["b", "a", "c"]))`,
+  l3: `gASVKAAAAAAAAACMBm1vZGVsc5SMBVBvaW50lJOUKYGUfZQojAF4lEsBjAF5lEsCdWIu`,
+  l4: `# 先看看沙箱里有什么
+print(os.listdir("/"))
+print(open("/readme.txt").read())`,
+};
+
+// l3 的载荷字段叫 data，其他叫 code
+const FIELD = { l1: "code", l2: "code", l3: "data", l4: "code" };
+
+function reset(level) {
+  document.getElementById("ta-" + level).value = SAMPLES[level];
+}
+
+async function run(level, btn) {
+  const box = document.getElementById("out-" + level);
+  const raw = document.getElementById("ta-" + level).value;
+
+  btn.disabled = true;
+  box.className = "out";
+  box.textContent = "运行中…";
+
+  try {
+    const resp = await fetch("/api/run/" + level, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ [FIELD[level]]: raw }),
+    });
+    const data = await resp.json();
+
+    if (data.error) {
+      box.className = "out err";
+      box.textContent = "服务端错误：" + data.error;
+      return;
+    }
+    box.textContent = (data.output || "（没有任何输出）") +
+                      "\n\n— 退出码 " + data.exit + " · " + data.ms + " ms";
+    box.className = "out " + (data.exit === 0 ? "ok" : "err");
+  } catch (e) {
+    box.className = "out err";
+    box.textContent = "请求失败：" + e;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+document.querySelectorAll("[data-run]").forEach((btn) => {
+  btn.addEventListener("click", () => run(btn.dataset.run, btn));
+});
+
+document.querySelectorAll("[data-reset]").forEach((btn) => {
+  btn.addEventListener("click", () => reset(btn.dataset.reset));
+});
+
+// 首次加载填好示例
+Object.keys(SAMPLES).forEach(reset);
+
+// Ctrl/Cmd + Enter 直接跑
+document.querySelectorAll("textarea").forEach((ta) => {
+  ta.addEventListener("keydown", (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      const level = ta.id.replace("ta-", "");
+      run(level, document.querySelector(`[data-run="${level}"]`));
+      e.preventDefault();
+    }
+  });
+});
+</script>
+</body>
+</html>

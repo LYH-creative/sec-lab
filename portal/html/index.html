@@ -241,15 +241,15 @@
       <span class="ver">v1.0 · docker</span>
     </div>
     <p class="lede">
-      一套跑在本地 Docker 里的安全练习环境。七个靶场覆盖 Web 漏洞、反序列化、
-      SSRF 协议利用、JWT 绕过、XXE 和应急响应，外加一个网络层的 ARP 欺骗实验。
+      一套跑在本地 Docker 里的安全练习环境。八个靶场覆盖 Web 漏洞、反序列化、
+      SSRF 协议利用、JWT 绕过、XXE、应急响应和沙箱逃逸，外加一个网络层的 ARP 欺骗实验。
       全部只绑定 <code>127.0.0.1</code>，出不了这台机器。
     </p>
 
     <div class="stats">
-      <div class="stat"><div class="n">7</div><div class="k">靶场</div></div>
-      <div class="stat"><div class="n">19</div><div class="k">容器</div></div>
-      <div class="stat"><div class="n">36</div><div class="k">关卡 · 后门 · 实验</div></div>
+      <div class="stat"><div class="n">8</div><div class="k">靶场</div></div>
+      <div class="stat"><div class="n">23</div><div class="k">容器</div></div>
+      <div class="stat"><div class="n">42</div><div class="k">关卡 · 后门 · 实验</div></div>
       <div class="stat"><div class="n">1</div><div class="k">条启动命令</div></div>
     </div>
 
@@ -322,7 +322,12 @@ const LABS = [
     port: 8899, levels: "9 后门 + 1 诱饵", badge: ["ir", "应急响应"], path: "/"
   },
   {
-    id: "07", name: "ARP 欺骗",
+    id: "07", name: "Sandbox Escape",
+    sub: "六关六种隔离手段：Node vm、Python 关键字黑名单、pickle 白名单、chroot、挂进容器的 docker.sock、privileged + hostPID。前四关在页面上打，后两关要真的从容器里逃出去。",
+    port: 8900, levels: "6 关 · 4 页面 2 终端", badge: ["hard", "进阶"], path: "/"
+  },
+  {
+    id: "08", name: "ARP 欺骗",
     sub: "三容器组成的小型网络：网关、受害者、攻击机。从「为什么 arpspoof 跑了没反应」开始，做到完整中间人、抓明文凭据、再自己做检测。需要在终端里操作。",
     port: null, levels: "7 个实验", badge: ["net", "网络"], cmd: "./lab.sh up all"
   }
@@ -330,6 +335,7 @@ const LABS = [
 
 const grid = document.getElementById("grid");
 const host = location.hostname || "127.0.0.1";
+const TOTAL = String(LABS.length).padStart(2, "0");
 
 grid.innerHTML = LABS.map(l => {
   const href = l.port ? `http://${host}:${l.port}${l.path || "/"}` : null;
@@ -343,7 +349,7 @@ grid.innerHTML = LABS.map(l => {
   return `
   <${tag} class="card ${href ? "" : "offline"}" ${attrs}>
     <div class="card-top">
-      <span class="idx">${l.id} / 07</span>
+      <span class="idx">${l.id} / ${TOTAL}</span>
       <span class="badge ${l.badge[0]}">${l.badge[1]}</span>
     </div>
     <h3>${l.name}</h3>

