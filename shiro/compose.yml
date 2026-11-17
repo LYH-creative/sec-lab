@@ -1,0 +1,67 @@
+name: shiro
+
+# =============================================================================
+#  单独起这个靶场： docker compose -f shiro/compose.yml up -d --build
+#  跟着总编排一起起： ./lab.sh up（顶层 compose 里有同样的服务定义）
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------------------
+  #  1. Shiro-550  CVE-2016-4437
+  #     rememberMe 的 AES 密钥是写死的 kPH+bIxk5D2deZiIxcaaaA==
+  # ---------------------------------------------------------------------------
+  shiro550:
+    build: .
+    image: sec-lab/shiro:1.0
+    container_name: shiro-550
+    ports:
+      - "127.0.0.1:8901:8080"
+    command: ["java", "-jar", "/app/shiro-1.2.4.jar",
+              "--lab.mode=550", "--lab.version=1.2.4"]
+    volumes:
+      - ./flags/l1.flag:/flag:ro
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  #  2. Shiro-721  CVE-2019-12422
+  #     1.2.5 起密钥随机了，但 AES-CBC 只加密不认证 —— padding oracle
+  # ---------------------------------------------------------------------------
+  shiro721:
+    build: .
+    image: sec-lab/shiro:1.0
+    container_name: shiro-721
+    ports:
+      - "127.0.0.1:8902:8080"
+    command: ["java", "-jar", "/app/shiro-1.2.5.jar",
+              "--lab.mode=721", "--lab.version=1.2.5"]
+    volumes:
+      - ./flags/l2.flag:/flag:ro
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  #  3. 路径绕过多版本对照
+  #     一个容器跑四个 JVM，端口 8903~8906 对应 1.4.2 / 1.5.2 / 1.6.0 / 1.7.1
+  #     实测只有 1.4.2 的 /;/admin 能打通，另外三个是"补丁怎么一步步堵上"的现场
+  # ---------------------------------------------------------------------------
+  shiro-bypass:
+    build: .
+    image: sec-lab/shiro:1.0
+    container_name: shiro-bypass
+    ports:
+      - "127.0.0.1:8903:8081"
+      - "127.0.0.1:8904:8082"
+      - "127.0.0.1:8905:8083"
+      - "127.0.0.1:8906:8084"
+    volumes:
+      - ./flags/l3.flag:/flag:ro
+    command:
+      - /bin/sh
+      - -c
+      - >
+        java -Xmx128m -jar /app/shiro-1.4.2.jar --lab.mode=bypass --lab.version=1.4.2 --server.port=8081 &
+        java -Xmx128m -jar /app/shiro-1.5.2.jar --lab.mode=bypass --lab.version=1.5.2 --server.port=8082 &
+        java -Xmx128m -jar /app/shiro-1.6.0.jar --lab.mode=bypass --lab.version=1.6.0 --server.port=8083 &
+        java -Xmx128m -jar /app/shiro-1.7.1.jar --lab.mode=bypass --lab.version=1.7.1 --server.port=8084 &
+        wait
+    restart: unless-stopped

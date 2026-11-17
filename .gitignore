@@ -31,6 +31,11 @@ deserialization/.git.archive/
 __pycache__/
 *.pyc
 
+# ---- Java 构建产物 ----
+# shiro/app/target 是本地 mvn 的中间产物；镜像构建在容器里做，
+# 不需要把 jar 提交进仓库
+shiro/app/target/
+
 # ---- 日志 ----
 # 注意：webshell-hunt/access.log 是靶场内容，必须提交，不要在这里排除
 *.log

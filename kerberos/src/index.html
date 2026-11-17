@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kerberos 黄金 / 白银票据靶场</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 28px 32px 48px; background: #faf9f7; color: #2c2c2a;
+         font: 14px/1.6 -apple-system, "PingFang SC", "Helvetica Neue", sans-serif; }
+  h1 { font-size: 20px; font-weight: 500; margin: 0 0 4px; }
+  h2 { font-size: 15px; font-weight: 500; margin: 0 0 12px; }
+  .sub { color: #5f5e5a; font-size: 13px; margin-bottom: 20px; }
+  .bar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+  .chip { background: #fff; border: 1px solid #e3e1dc; border-radius: 8px;
+          padding: 8px 14px; font-size: 13px; }
+  .chip b { font-weight: 500; color: #185fa5; }
+  .chip.warn b { color: #a32d2d; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 780px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: #fff; border: 1px solid #e3e1dc; border-radius: 12px; padding: 16px 18px; }
+  .logs { height: 300px; overflow-y: auto; font: 12px/1.6 ui-monospace, "SF Mono", Menlo, monospace; }
+  .row { padding: 5px 0; border-bottom: 1px solid #f1efe8; white-space: pre-wrap; word-break: break-all; }
+  .row:last-child { border-bottom: 0; }
+  .ev { display: inline-block; min-width: 42px; color: #185fa5; font-weight: 500; }
+  .ev.host { color: #0f6e56; }
+  .fail { color: #a32d2d; }
+  .note { color: #5f5e5a; }
+  .empty { color: #888780; padding: 12px 0; }
+  .levels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 20px; }
+  @media (max-width: 780px) { .levels { grid-template-columns: 1fr; } }
+  .lv { background: #fff; border: 1px solid #e3e1dc; border-radius: 12px; padding: 14px 16px; }
+  .lv.done { border-color: #9fe1cb; background: #f2fbf7; }
+  .lv .n { font-size: 12px; color: #888780; }
+  .lv .t { font-size: 14px; font-weight: 500; margin: 4px 0 8px; }
+  .lv .d { font-size: 12px; color: #5f5e5a; min-height: 48px; }
+  .lv code { display: block; margin-top: 8px; font-size: 11px; color: #0f6e56; word-break: break-all; }
+  .foot { margin-top: 24px; font-size: 12px; color: #5f5e5a; }
+  .foot code { background: #f1efe8; padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<h1>Kerberos 黄金 / 白银票据靶场</h1>
+<div class="sub">左侧是域控安全日志，右侧是成员服务器本地日志。用白银票据时，请盯着左边 —— 它不会新增任何一行。</div>
+
+<div class="bar" id="bar"></div>
+
+<div class="grid">
+  <div class="card">
+    <h2>域控 DC 安全日志（4768 / 4769）</h2>
+    <div class="logs" id="dc"></div>
+  </div>
+  <div class="card">
+    <h2>目标服务器本地日志（4624 / 4625）</h2>
+    <div class="logs" id="host"></div>
+  </div>
+</div>
+
+<div class="levels" id="levels"></div>
+
+<div class="foot">
+  <div>服务列表：<span id="services"></span></div>
+  <div style="margin-top:8px">宿主机操作：<code>python3 poc/lab.py --help</code>　一键通关验证：<code>python3 poc/solve.py</code>　重置：<code>python3 poc/lab.py restart</code></div>
+  <div style="margin-top:8px">面板每 2 秒自动刷新。本靶场是 Kerberos 信任关系的协议语义仿真，票据用带密钥的 HMAC 封印代替真实加密，便于直接查看 PAC 内容。</div>
+</div>
+
+<script>
+var LEVEL_TEXT = {
+  1: ["正常三段流程", "用 alice 走完 AS → TGS → AP，看懂三方日志怎么对上"],
+  2: ["黄金票据", "泄露 krbtgt 密钥，离线伪造 10 年期 TGT，访问域控 C$"],
+  3: ["白银票据", "泄露机器账户密钥，离线伪造 cifs TGS，DC 日志保持空白"],
+  4: ["范围限制", "把 cifs 白银票据投给 http 服务，观察 SPN 不匹配被拒"],
+  5: ["PAC 签名强制", "开启完整 PAC 校验，白银被拒而黄金仍然有效"],
+  6: ["密钥轮换", "重置 krbtgt 两次，观察黄金票据何时真正失效"]
+};
+
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+  });
+}
+
+function renderLog(rows, kind) {
+  if (!rows.length) return '<div class="empty">（暂无日志）</div>';
+  return rows.slice().reverse().map(function (r) {
+    var cls = r.result === "fail" ? " fail" : "";
+    var extra = [];
+    if (r.linked_4768 === false) extra.push("无对应 4768");
+    if (r.forged_tgs) extra.push("票据非 KDC 签发");
+    if (r.groups) extra.push("组:" + r.groups.join(","));
+    if (r.reason) extra.push(r.reason);
+    if (r.note) extra.push(r.note);
+    return '<div class="row"><span class="ev ' + kind + '">' + esc(r.event) + '</span>' +
+      ' <span class="' + cls.trim() + '">' + esc(r.time) + '  ' + esc(r.user) + '  ' + esc(r.spn) +
+      (cls ? "  FAIL" : "") + '</span>' +
+      (extra.length ? '<div class="note">    ' + esc(extra.join(" | ")) + '</div>' : '') + '</div>';
+  }).join("");
+}
+
+function render(d) {
+  var bar = [
+    '<div class="chip">域 <b>' + esc(d.realm) + '</b></div>',
+    '<div class="chip">域 SID <b>' + esc(d.domain_sid) + '</b></div>',
+    '<div class="chip">krbtgt 重置 <b>' + d.resets + '</b> 次 · 当前接受 <b>' + d.accepted_keys + '</b> 把密钥</div>',
+    '<div class="chip' + (d.pac_strict ? ' warn' : '') + '">完整 PAC 签名校验 <b>' + (d.pac_strict ? '已强制' : '未开启') + '</b></div>',
+    '<div class="chip">通关 <b>' + Object.keys(d.progress).filter(function (k) { return d.progress[k]; }).length + '/' + d.total_levels + '</b></div>'
+  ];
+  document.getElementById("bar").innerHTML = bar.join("");
+  document.getElementById("dc").innerHTML = renderLog(d.dc_logs, "");
+  document.getElementById("host").innerHTML = renderLog(d.host_logs, "host");
+  document.getElementById("services").textContent = Object.keys(d.services).join("  ·  ");
+
+  var html = "";
+  for (var n = 1; n <= d.total_levels; n++) {
+    var p = d.progress[String(n)];
+    var t = LEVEL_TEXT[n];
+    html += '<div class="lv' + (p ? ' done' : '') + '">' +
+      '<div class="n">LEVEL ' + n + (p ? '　已通关 ' + esc(p.time) : '　未通关') + '</div>' +
+      '<div class="t">' + esc(t[0]) + '</div>' +
+      '<div class="d">' + esc(p ? p.evidence : t[1]) + '</div>' +
+      (p ? '<code>' + esc(p.flag || '') + '</code>' : '') + '</div>';
+  }
+  document.getElementById("levels").innerHTML = html;
+}
+
+function tick() {
+  fetch("/api/state").then(function (r) { return r.json(); }).then(render).catch(function () {});
+}
+tick();
+setInterval(tick, 2000);
+</script>
+</body>
+</html>

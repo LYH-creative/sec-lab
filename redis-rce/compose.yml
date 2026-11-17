@@ -1,0 +1,53 @@
+# =============================================================================
+#  redis-rce —— 直接打 Redis 未授权，三关递进到 root
+# =============================================================================
+#
+#  起：  docker compose -f redis-rce/compose.yml up -d
+#  铺 flag：./redis-rce/setup.sh
+#
+#  和 gopher 靶场的区别：
+#    gopher 是「SSRF 借 gopher:// 打内网 Redis」，入口在 web；
+#    这里是「Redis 直接暴露在 6379」，没有中间商，练的是纯 Redis 利用。
+#
+#  端口只用 127.0.0.1 绑定，不对局域网暴露。
+#  redis 刻意用 root 起（见 redis/Dockerfile 里的注释），
+#  否则 L2 写 web 目录、L3 写 /etc/cron.d 都不成立。
+# =============================================================================
+
+name: sec-lab-redis-rce
+
+services:
+  redis-rce-redis:
+    image: sec-lab/redis-rce-redis:1.0
+    container_name: redis-rce-redis
+    ports:
+      - "127.0.0.1:16379:6379"
+    volumes:
+      # L2：redis 的 CONFIG SET dir 要能落到 web 根目录下
+      - ./www:/var/www/html
+      # L1 的 flag 是 redis 里的数据，启动时由 entrypoint 灌进去
+      - ./flags/l1.flag:/flags/l1.flag:ro
+      # L3 的 flag 也走只读挂载，entrypoint 复制到 /flag_l3 再 chmod 600
+      - ./flags/l3.flag:/flags/l3.flag:ro
+    extra_hosts:
+      # L3：反弹 shell 回宿主机。Docker Desktop 自带这个解析，
+      # 显式写一遍是为了 Linux 上也能跑（host-gateway）。
+      - "host.docker.internal:host-gateway"
+    networks: [rr-net]
+    restart: unless-stopped
+
+  redis-rce-web:
+    image: sec-lab/redis-rce-web:1.0
+    container_name: redis-rce-web
+    ports:
+      - "127.0.0.1:18080:80"
+    volumes:
+      - ./www:/var/www/html
+      - ./flags/l2.flag:/flag_l2:ro
+    depends_on: [redis-rce-redis]
+    networks: [rr-net]
+    restart: unless-stopped
+
+networks:
+  rr-net:
+    name: redis-rce-net

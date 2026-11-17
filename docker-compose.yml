@@ -475,6 +475,140 @@ services:
     networks:
       - sbox-net
 
+  # ===========================================================================
+  #  9. Shiro —— 六个版本，三类洞
+  #     550：1.2.4 硬编码 AES 密钥，rememberMe 反序列化直接 RCE
+  #     721：1.2.5 密钥随机了，但 CBC 只加密不认证，padding oracle 伪造身份
+  #     1.4.2 / 1.5.2 / 1.6.0 / 1.7.1：路径绕过的四个 CVE 各补一刀，看版本差异
+  #
+  #     一个镜像里打包了六个 jar，靠 --lab.mode 和 --server.port 分工。
+  #     只有 shiro-550 带 build，另外两个复用同一个镜像，避免构建三遍。
+  # ===========================================================================
+  shiro-550:
+    build: ./shiro
+    image: sec-lab/shiro:1.0
+    container_name: shiro-550
+    <<: *default-restart
+    ports:
+      - "${LAB_BIND:-127.0.0.1}:8901:8080"
+    command: ["java", "-jar", "/app/shiro-1.2.4.jar",
+              "--lab.mode=550", "--lab.version=1.2.4"]
+    volumes:
+      - ./shiro/flags/l1.flag:/flag:ro
+    logging: *default-logging
+    networks:
+      - shiro-net
+
+  shiro-721:
+    image: sec-lab/shiro:1.0
+    pull_policy: never
+    container_name: shiro-721
+    <<: *default-restart
+    depends_on:
+      - shiro-550
+    ports:
+      - "${LAB_BIND:-127.0.0.1}:8902:8080"
+    command: ["java", "-jar", "/app/shiro-1.2.5.jar",
+              "--lab.mode=721", "--lab.version=1.2.5"]
+    volumes:
+      - ./shiro/flags/l2.flag:/flag:ro
+    logging: *default-logging
+    networks:
+      - shiro-net
+
+  shiro-bypass:
+    image: sec-lab/shiro:1.0
+    pull_policy: never
+    container_name: shiro-bypass
+    <<: *default-restart
+    depends_on:
+      - shiro-550
+    ports:
+      - "${LAB_BIND:-127.0.0.1}:8903:8081"
+      - "${LAB_BIND:-127.0.0.1}:8904:8082"
+      - "${LAB_BIND:-127.0.0.1}:8905:8083"
+      - "${LAB_BIND:-127.0.0.1}:8906:8084"
+    volumes:
+      - ./shiro/flags/l3.flag:/flag:ro
+    command:
+      - /bin/sh
+      - -c
+      - >
+        java -Xmx128m -jar /app/shiro-1.4.2.jar --lab.mode=bypass --lab.version=1.4.2 --server.port=8081 &
+        java -Xmx128m -jar /app/shiro-1.5.2.jar --lab.mode=bypass --lab.version=1.5.2 --server.port=8082 &
+        java -Xmx128m -jar /app/shiro-1.6.0.jar --lab.mode=bypass --lab.version=1.6.0 --server.port=8083 &
+        java -Xmx128m -jar /app/shiro-1.7.1.jar --lab.mode=bypass --lab.version=1.7.1 --server.port=8084 &
+        wait
+    logging: *default-logging
+    networks:
+      - shiro-net
+
+  # ===========================================================================
+  #  10. Replay / AD CS —— 请求重放 + NTLM 中继 + 证书提权（协议级模拟）
+  #      一个纯标准库 Python 进程里分四个角色：bank / victim / certsrv / kdc。
+  #      NTLMv2 报文和验签是真算的；证书、TGT 是 JSON + HMAC 代替真 X.509 / PAC。
+  #      不是 Windows 域，边界写在 replay-adcs/README.md 里。
+  # ===========================================================================
+  replay-adcs:
+    build: ./replay-adcs
+    image: sec-lab/replay-adcs:1.0
+    container_name: replay-adcs
+    <<: *default-restart
+    environment:
+      LAB_PORT: "8080"
+      LAB_FLAG_DIR: /flags
+      PYTHONUNBUFFERED: "1"
+    ports:
+      - "${LAB_BIND:-127.0.0.1}:8910:8080"
+    volumes:
+      - ./replay-adcs/flags:/flags:ro
+    logging: *default-logging
+    networks:
+      - replay-adcs-net
+
+  # ===========================================================================
+  #  11. Redis RCE —— 未授权 → 写 webshell → 写 crontab 反弹 root shell
+  #      redis 刻意以 root 跑（覆盖官方 entrypoint 的降权），
+  #      否则 L2 写 /var/www/html、L3 写 /etc/crontabs 都不成立。
+  #      和 gopher L3/L4 的区别：那边走 SSRF+ gopher:// 打内网 redis，
+  #      这里 6379 直接暴露，练的是纯 Redis 利用。
+  # ===========================================================================
+  redis-rce-redis:
+    build: ./redis-rce/redis
+    image: sec-lab/redis-rce-redis:1.0
+    container_name: redis-rce-redis
+    <<: *default-restart
+    ports:
+      - "${LAB_BIND:-127.0.0.1}:16379:6379"
+    volumes:
+      # 和 web 共享同一份 html：L2 的 CONFIG SET dir 要能落到 web 根目录下
+      - ./redis-rce/www:/var/www/html
+      - ./redis-rce/flags/l1.flag:/flags/l1.flag:ro
+      # L3 的 flag 也走只读挂载，entrypoint 复制到 /flag_l3 再 chmod 600
+      - ./redis-rce/flags/l3.flag:/flags/l3.flag:ro
+    extra_hosts:
+      # L3 的反弹 shell 要回连宿主机（Linux 上靠 host-gateway）
+      - "host.docker.internal:host-gateway"
+    logging: *default-logging
+    networks:
+      - redis-rce-net
+
+  redis-rce-web:
+    build: ./redis-rce/web
+    image: sec-lab/redis-rce-web:1.0
+    container_name: redis-rce-web
+    <<: *default-restart
+    depends_on:
+      - redis-rce-redis
+    ports:
+      - "${LAB_BIND:-127.0.0.1}:8911:80"
+    volumes:
+      - ./redis-rce/www:/var/www/html
+      - ./redis-rce/flags/l2.flag:/flag_l2:ro
+    logging: *default-logging
+    networks:
+      - redis-rce-net
+
 # =============================================================================
 #  网络：一个靶场一个，互不可见
 # =============================================================================
@@ -494,6 +628,12 @@ networks:
   hunt-net:
     driver: bridge
   sbox-net:
+    driver: bridge
+  shiro-net:
+    driver: bridge
+  replay-adcs-net:
+    driver: bridge
+  redis-rce-net:
     driver: bridge
   arp-net:
     driver: bridge

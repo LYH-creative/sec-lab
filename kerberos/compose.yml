@@ -1,0 +1,21 @@
+name: sec-lab-kerberos
+
+services:
+  kerberos-kdc:
+    image: python:3.12-slim
+    container_name: sec-lab-kerberos-kdc
+    command: ["python3", "/app/server.py"]
+    environment:
+      - TZ=UTC-8
+    ports:
+      - "127.0.0.1:8907:8907"
+    volumes:
+      - ./src:/app:ro
+      - ./flags:/flags:ro
+    restart: unless-stopped
+    networks:
+      - kerberos-net
+
+networks:
+  kerberos-net:
+    driver: bridge

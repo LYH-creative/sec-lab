@@ -1,0 +1,8 @@
+# 构建产物与依赖不进 git；靶场源码、脚本、手册、poc 才进。
+libs/
+classes/
+attacker/
+evidence/
+classes-evil/
+.unpack/
+.shiro-lab.jar

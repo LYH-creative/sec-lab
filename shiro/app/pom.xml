@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  一套代码，六个 Shiro 版本。
+
+  构建时用 -Dshiro.version=x.y.z 覆盖版本号，Dockerfile 里循环打六次包，
+  得到 shiro-1.2.4.jar / shiro-1.2.5.jar / shiro-1.4.2.jar … 六个可执行 jar。
+  运行时用 lab.mode=550 / 721 / bypass 切换应用行为，所以源码只有一份。
+
+  为什么钉在 Spring Boot 2.3.12：
+    CVE-2020-1957 这批路径绕过是 2020 年的洞，当时的真实环境就是
+    Spring Boot 2.2/2.3 + Tomcat 9.0.3x。换成 Boot 2.7（Tomcat 9.0.8x）
+    以后 Tomcat 自己会归一化一部分畸形路径，绕过的现象会被"意外修好"，
+    反而看不出 Shiro 版本之间的差异。
+
+  commons-collections 3.1 是刻意加进来的：
+    Shiro 本身不带 gadget，真实世界里能打 550 是因为业务方自己引了
+    commons-collections / c3p0 / beanutils 之类。这里还原这个前提，
+    否则反序列化成功也没有链可用。
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>2.3.12.RELEASE</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>lab.shiro</groupId>
+  <artifactId>shiro-lab</artifactId>
+  <version>1.0</version>
+  <name>shiro-lab</name>
+
+  <properties>
+    <java.version>1.8</java.version>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <!-- 六个版本由命令行覆盖，这里的值只是默认 -->
+    <shiro.version>1.2.4</shiro.version>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.apache.shiro</groupId>
+      <artifactId>shiro-spring</artifactId>
+      <version>${shiro.version}</version>
+    </dependency>
+
+    <!-- 反序列化 gadget，见文件头说明 -->
+    <dependency>
+      <groupId>commons-collections</groupId>
+      <artifactId>commons-collections</artifactId>
+      <version>3.1</version>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <finalName>shiro-lab</finalName>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+      </plugin>
+    </plugins>
+  </build>
+</project>

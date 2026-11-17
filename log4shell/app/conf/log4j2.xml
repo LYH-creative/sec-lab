@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  必须显式给一份 log4j2 配置。
+
+  log4j-core 在找不到配置时会退回 DefaultConfiguration，root level 是 ERROR
+  且只有 Console appender。那样 LOG.info() 连日志事件都不会生成，
+  StrSubstitutor 更不会去解析 ${jndi:...} —— 表现为"payload 发了但没反应"。
+
+  %msg（= %m）在 2.14.1 的 MessagePatternConverter 里默认开启 lookups，
+  这就是漏洞入口；2.17.1 把这个默认关掉并移除了 JndiLookup 的 JNDI 能力。
+-->
+<Configuration status="WARN">
+  <Appenders>
+    <Console name="Console" target="SYSTEM_OUT">
+      <PatternLayout pattern="%d{HH:mm:ss.SSS} %-5level %logger{1} - %msg%n"/>
+    </Console>
+  </Appenders>
+  <Loggers>
+    <Root level="info">
+      <AppenderRef ref="Console"/>
+    </Root>
+  </Loggers>
+</Configuration>

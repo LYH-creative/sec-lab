@@ -1,0 +1,12 @@
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0">
+  <!-- 国内拉 Maven Central 经常卡在依赖解析上，镜像兜一层。
+       想验证"官方源不可用会怎样"，把 Dockerfile 里 COPY 这行删掉即可。 -->
+  <mirrors>
+    <mirror>
+      <id>aliyun</id>
+      <mirrorOf>central</mirrorOf>
+      <name>aliyun central</name>
+      <url>https://maven.aliyun.com/repository/public</url>
+    </mirror>
+  </mirrors>
+</settings>

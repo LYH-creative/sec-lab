@@ -61,7 +61,8 @@ preflight() {
 ALL_CONTAINERS="lab-portal dvwa dvwa-db deser-php deser-php74 deser-java
 xxe-web xxe-internal gopher-web gopher-legacy-public gopher-legacy-internal
 gopher-redis gopher-db gopher-fpm jwt-web webshell-hunt
-sbox-web sbox-sock sbox-vault sbox-priv
+sbox-web sbox-sock sbox-vault sbox-priv replay-adcs
+redis-rce-redis redis-rce-web
 arp-gw arp-victim arp-attacker"
 
 cleanup_conflicts() {
@@ -267,8 +268,15 @@ print_banner() {
     printf '  JWT           http://127.0.0.1:8898/        %salice / alice123%s\n' "$C_DIM" "$C_0"
     printf '  webshell-hunt http://127.0.0.1:8899/        %sdocker exec -it webshell-hunt bash%s\n' "$C_DIM" "$C_0"
     printf '  Sandbox Escape http://127.0.0.1:8900/       %sL1~L4 页面 · L5/L6 终端%s\n' "$C_DIM" "$C_0"
+    printf '  Shiro 550      http://127.0.0.1:8901/       %s默认密钥 + CC6%s\n' "$C_DIM" "$C_0"
+    printf '  Shiro 721      http://127.0.0.1:8902/       %spadding oracle%s\n' "$C_DIM" "$C_0"
+    printf '  Shiro 绕过     http://127.0.0.1:8903~8906/  %s1.4.2 / 1.5.2 / 1.6.0 / 1.7.1%s\n' "$C_DIM" "$C_0"
     printf '                %sdocker exec -it sbox-sock bash%s  %s/  %sdocker exec -it sbox-priv bash%s\n' \
         "$C_DIM" "$C_0" "$C_DIM" "$C_DIM" "$C_0"
+    printf '  Shiro 550     http://127.0.0.1:8901/        %sroot / root123 · 默认密钥%s\n' "$C_DIM" "$C_0"
+    printf '  Shiro 721     http://127.0.0.1:8902/        %spadding oracle%s\n' "$C_DIM" "$C_0"
+    printf '  Shiro 绕过    http://127.0.0.1:8903~8906/   %s1.4.2 / 1.5.2 / 1.6.0 / 1.7.1%s\n' "$C_DIM" "$C_0"
+    printf '  Replay/AD CS  http://127.0.0.1:8910/        %s5 关 · 重放→中继→证书→域管%s\n' "$C_DIM" "$C_0"
     if [ "$scope" = "all" ]; then
         printf '  ARP           终端实验，见 %sarp/README.md%s\n' "$C_DIM" "$C_0"
     else
@@ -300,7 +308,7 @@ cmd_status() {
         # 注意 macOS 的 lsof 输出形如 "127.0.0.1:8900 (LISTEN)"，
         # 端口后面还有 "(LISTEN)"，所以不能用 $ 锚定行尾
         lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null \
-            | awk 'NR==1 || /:(8880|8888|8890|8891|8892|8895|8896|8898|8899|8900|7070)( |$)/' \
+            | awk 'NR==1 || /:(8880|8888|8890|8891|8892|8895|8896|8898|8899|8900|8901|8902|8903|8904|8905|8906|8910|7070)( |$)/' \
             | sed 's/^/    /' || true
     fi
 }
@@ -374,7 +382,7 @@ cmd_answer() {
         # 没指定靶场：只打印最上面的 flag 汇总表
         awk '/^## 一、flag 总表/{f=1} f&&/^## /&&!/flag 总表/{exit} f' "$f"
         echo
-        info "看某一关的完整思路：./lab.sh answer <dvwa|deser|xxe|gopher|jwt|hunt|escape|arp>"
+        info "看某一关的完整思路：./lab.sh answer <dvwa|deser|xxe|gopher|jwt|hunt|escape|shiro|replay|arp|kerberos|log4shell|memshell>"
         return 0
     fi
 
@@ -386,8 +394,13 @@ cmd_answer() {
         jwt|JWT)                        pat="JWT" ;;
         hunt|webshell|webshell-hunt)    pat="webshell-hunt" ;;
         escape|sandbox|sbox|沙箱)       pat="Sandbox Escape" ;;
+        shiro|Shiro|550|721)            pat="Shiro" ;;
         arp|ARP)                        pat="ARP" ;;
+        replay|adcs|重放|证书)           pat="Replay" ;;
         dvwa|DVWA)                      pat="DVWA" ;;
+        kerberos|票据|黄金|白银)         pat="Kerberos" ;;
+        log4shell|log4j|Log4Shell)      pat="Log4Shell" ;;
+        memshell|内存马)                pat="Java 内存马" ;;
     esac
 
     # 注意：BSD awk（macOS 自带）不支持 IGNORECASE，用 tolower 代替

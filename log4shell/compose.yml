@@ -1,0 +1,55 @@
+# =============================================================================
+#  Log4Shell（CVE-2021-44228）练习靶场
+# =============================================================================
+#
+#  起：  docker compose -f log4shell/compose.yml up -d --build
+#  铺：  ./log4shell/setup.sh
+#  停：  docker compose -f log4shell/compose.yml down
+#
+#  和根目录 docker-compose.yml 完全独立（独立 project name、独立网络），
+#  不改动现有八个靶场，跟 redis-rce / shiro 一样是"单模块模式"。
+#
+#  端口全部只绑 127.0.0.1。这里的 2.14.1 真的能 RCE，别改成 0.0.0.0。
+# =============================================================================
+
+name: sec-lab-log4shell
+
+services:
+
+  # 被攻击的应用：一个容器三个 JVM，区别只在 classpath 与 JVM 参数
+  log4shell-app:
+    build: ./app
+    container_name: log4shell-app
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:19080:8080"     # 2.14.1 + trustURLCodebase=true   L1~L3
+      - "127.0.0.1:19081:8081"     # 2.14.1 + JDK 默认                L4 对照
+      - "127.0.0.1:19082:8082"     # 2.17.1                           L4 对照
+    volumes:
+      - ./flags/l1.flag:/flag_l1:ro
+      - ./flags/l2.flag:/flag_l2:ro
+      - ./flags/l3.flag:/flag_l3:ro
+    networks:
+      - l4sh-net
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+  # 攻击者侧：LDAP 1389 + HTTP 8000（codebase / 事件收集）
+  log4shell-attacker:
+    build: ./attacker
+    container_name: log4shell-attacker
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:19089:8000"
+    networks:
+      l4sh-net:
+        aliases:
+          - attacker        # payload 里写死 ldap://attacker:1389，靠这个解析
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+networks:
+  l4sh-net:
+    driver: bridge
